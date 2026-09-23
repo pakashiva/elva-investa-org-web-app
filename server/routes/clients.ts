@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { loadCustomerDetails, mapCustomer } from '../customerView.ts';
-import { pool } from '../db.ts';
-import { asyncHandler, requireAuth, requireSuperAdmin } from '../middleware.ts';
-import { provisionClient } from '../provisionClient.ts';
-import type { AuthedRequest } from '../types.ts';
-import { isUuid, money as toMoney } from '../util.ts';
+import { loadCustomerDetails, mapCustomer } from '../customerView';
+import { pool } from '../db';
+import { asyncHandler, requireAuth, requireSuperAdmin } from '../middleware';
+import { provisionClient } from '../provisionClient';
+import type { AuthedRequest } from '../types';
+import { isUuid, money as toMoney } from '../util';
 
 export const clientsRouter = Router();
 

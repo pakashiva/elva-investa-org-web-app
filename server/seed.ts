@@ -1,6 +1,6 @@
-import { config } from './config.ts';
-import { pool } from './db.ts';
-import { findUserByUsername, hashPassword } from './auth.ts';
+import { config } from './config';
+import { pool } from './db';
+import { findUserByUsername, hashPassword } from './auth';
 
 export async function seedSuperAdmin() {
   const existing = await findUserByUsername(config.superAdmin.username);

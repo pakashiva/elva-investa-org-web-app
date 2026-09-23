@@ -1,5 +1,5 @@
-import { migrate, waitForDatabase } from './db.ts';
-import { seedSuperAdmin } from './seed.ts';
+import { migrate, waitForDatabase } from './db';
+import { seedSuperAdmin } from './seed';
 
 let ready: Promise<void> | null = null;
 

@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { mapAgreementParty, officeForSelection } from '../agreementParty.ts';
-import { normalizeEmail, normalizeMobile } from '../customerCodes.ts';
-import { pool } from '../db.ts';
-import { asyncHandler } from '../middleware.ts';
-import type { AuthedRequest } from '../types.ts';
-import { EMAIL_MOBILE_COMBO_ERROR, isEmailMobileComboDuplicate } from '../util.ts';
+import { mapAgreementParty, officeForSelection } from '../agreementParty';
+import { normalizeEmail, normalizeMobile } from '../customerCodes';
+import { pool } from '../db';
+import { asyncHandler } from '../middleware';
+import type { AuthedRequest } from '../types';
+import { EMAIL_MOBILE_COMBO_ERROR, isEmailMobileComboDuplicate } from '../util';
 
 export const investmentsRouter = Router();
 

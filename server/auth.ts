@@ -1,9 +1,9 @@
 import bcrypt from 'bcryptjs';
 import type { CookieOptions, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { config } from './config.ts';
-import { pool } from './db.ts';
-import type { AuthUser, UserRole, UserRow } from './types.ts';
+import { config } from './config';
+import { pool } from './db';
+import type { AuthUser, UserRole, UserRow } from './types';
 
 const cookieOptions: CookieOptions = {
   httpOnly: true,

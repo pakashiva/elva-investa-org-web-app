@@ -1,12 +1,12 @@
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { authRouter } from './routes/auth.ts';
-import { clientPortalRouter } from './routes/clientPortal.ts';
-import { clientsRouter } from './routes/clients.ts';
-import { dashboardRouter } from './routes/dashboard.ts';
-import { mobileAuthRouter } from './routes/mobileAuth.ts';
-import { mobilePortalRouter } from './routes/mobilePortal.ts';
+import { authRouter } from './routes/auth';
+import { clientPortalRouter } from './routes/clientPortal';
+import { clientsRouter } from './routes/clients';
+import { dashboardRouter } from './routes/dashboard';
+import { mobileAuthRouter } from './routes/mobileAuth';
+import { mobilePortalRouter } from './routes/mobilePortal';
 
 export const app = express();
 app.use(express.json());

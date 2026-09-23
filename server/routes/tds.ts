@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { pool } from '../db.ts';
-import { asyncHandler } from '../middleware.ts';
-import type { AuthedRequest } from '../types.ts';
-import { asNumber, money } from '../util.ts';
+import { pool } from '../db';
+import { asyncHandler } from '../middleware';
+import type { AuthedRequest } from '../types';
+import { asNumber, money } from '../util';
 
 export const tdsRouter = Router();
 

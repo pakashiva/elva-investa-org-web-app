@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import pg from 'pg';
-import { config } from './config.ts';
+import { config } from './config';
 
 const { Pool } = pg;
 

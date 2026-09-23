@@ -1,5 +1,5 @@
-import { pool } from './db.ts';
-import type { AuthUser } from './types.ts';
+import { pool } from './db';
+import type { AuthUser } from './types';
 
 export type ClientSummary = {
   id: string;

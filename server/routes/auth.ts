@@ -8,12 +8,12 @@ import {
   signAuthToken,
   toAuthUser,
   verifyPassword,
-} from '../auth.ts';
-import { pool } from '../db.ts';
-import { asyncHandler, requireAuth } from '../middleware.ts';
-import { provisionClient } from '../provisionClient.ts';
-import { findClientSummary, sessionUser } from '../session.ts';
-import type { AuthedRequest, UserRow } from '../types.ts';
+} from '../auth';
+import { pool } from '../db';
+import { asyncHandler, requireAuth } from '../middleware';
+import { provisionClient } from '../provisionClient';
+import { findClientSummary, sessionUser } from '../session';
+import type { AuthedRequest, UserRow } from '../types';
 
 export const authRouter = Router();
 

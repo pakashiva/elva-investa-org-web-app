@@ -1,5 +1,5 @@
-import { pool } from './db.ts';
-import { money } from './util.ts';
+import { pool } from './db';
+import { money } from './util';
 
 export function toDateOnly(value: unknown) {
   const raw = String(value ?? '');

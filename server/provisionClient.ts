@@ -1,9 +1,9 @@
-import { hashPassword } from './auth.ts';
-import { pool } from './db.ts';
+import { hashPassword } from './auth';
+import { pool } from './db';
 import {
   parseAgreementParty,
   validateAgreementParty,
-} from './agreementParty.ts';
+} from './agreementParty';
 
 const PAYOUT_DAYS = new Set([1, 5, 10, 15, 20, 25]);
 

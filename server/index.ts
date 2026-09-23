@@ -1,6 +1,6 @@
-import { config } from './config.ts';
-import { app } from './app.ts';
-import { ensureReady } from './ready.ts';
+import { config } from './config';
+import { app } from './app';
+import { ensureReady } from './ready';
 
 async function start() {
   await ensureReady();

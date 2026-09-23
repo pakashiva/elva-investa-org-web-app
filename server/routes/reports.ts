@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { pool } from '../db.ts';
-import { asyncHandler } from '../middleware.ts';
-import type { AuthedRequest } from '../types.ts';
-import { isUuid, money, text } from '../util.ts';
+import { pool } from '../db';
+import { asyncHandler } from '../middleware';
+import type { AuthedRequest } from '../types';
+import { isUuid, money, text } from '../util';
 
 export const reportsRouter = Router();
 

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { pool } from '../db.ts';
-import { asyncHandler, requireCustomer } from '../middleware.ts';
-import type { CustomerRequest } from '../types.ts';
-import { toDateOnly } from '../customerView.ts';
-import { formatInr, isUuid, money, text } from '../util.ts';
+import { pool } from '../db';
+import { asyncHandler, requireCustomer } from '../middleware';
+import type { CustomerRequest } from '../types';
+import { toDateOnly } from '../customerView';
+import { formatInr, isUuid, money, text } from '../util';
 
 export const mobilePortalRouter = Router();
 

@@ -1,17 +1,17 @@
 import { Router } from 'express';
-import { agreementsRouter } from './agreements.ts';
-import { customersRouter } from './customers.ts';
-import { investmentsRouter } from './investments.ts';
-import { notificationsRouter } from './notifications.ts';
-import { referralsRouter } from './referrals.ts';
-import { reportsRouter } from './reports.ts';
-import { settingsRouter } from './settings.ts';
-import { tdsRouter } from './tds.ts';
-import { withdrawalsRouter } from './withdrawals.ts';
-import { pool } from '../db.ts';
-import { asyncHandler, requireAuth, requireClientAdmin } from '../middleware.ts';
-import type { AuthedRequest } from '../types.ts';
-import { money } from '../util.ts';
+import { agreementsRouter } from './agreements';
+import { customersRouter } from './customers';
+import { investmentsRouter } from './investments';
+import { notificationsRouter } from './notifications';
+import { referralsRouter } from './referrals';
+import { reportsRouter } from './reports';
+import { settingsRouter } from './settings';
+import { tdsRouter } from './tds';
+import { withdrawalsRouter } from './withdrawals';
+import { pool } from '../db';
+import { asyncHandler, requireAuth, requireClientAdmin } from '../middleware';
+import type { AuthedRequest } from '../types';
+import { money } from '../util';
 
 export const clientPortalRouter = Router();
 

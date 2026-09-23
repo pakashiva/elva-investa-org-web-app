@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
-import { findUserById, readToken, toAuthUser, verifyAuthToken } from './auth.ts';
-import { pool } from './db.ts';
-import type { AuthedRequest, CustomerAuth, CustomerRequest } from './types.ts';
+import { findUserById, readToken, toAuthUser, verifyAuthToken } from './auth';
+import { pool } from './db';
+import type { AuthedRequest, CustomerAuth, CustomerRequest } from './types';
 
 export function asyncHandler(
   handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>

@@ -52,8 +52,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     }
 
     restoreApiPath(req);
-    const { app } = await import('../server/app.ts');
-    const { ensureReady } = await import('../server/ready.ts');
+    const { app } = await import('../server/app');
+    const { ensureReady } = await import('../server/ready');
     await ensureReady();
 
     await new Promise<void>((resolve, reject) => {

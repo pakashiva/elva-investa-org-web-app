@@ -1,4 +1,4 @@
-import { text } from './util.ts';
+import { text } from './util';
 
 export type AgreementOffice = {
   id: string;

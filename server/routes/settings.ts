@@ -4,11 +4,11 @@ import {
   mapAgreementParty,
   parseAgreementParty,
   validateAgreementParty,
-} from '../agreementParty.ts';
-import { pool } from '../db.ts';
-import { asyncHandler } from '../middleware.ts';
-import type { AuthedRequest } from '../types.ts';
-import { text } from '../util.ts';
+} from '../agreementParty';
+import { pool } from '../db';
+import { asyncHandler } from '../middleware';
+import type { AuthedRequest } from '../types';
+import { text } from '../util';
 
 export const settingsRouter = Router();
 

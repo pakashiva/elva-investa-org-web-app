@@ -1,12 +1,12 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
-import { hashPassword } from '../auth.ts';
-import { normalizeEmail, normalizeMobile, uniqueReferralCode } from '../customerCodes.ts';
-import { mapCustomer, loadCustomerDetails } from '../customerView.ts';
-import { pool } from '../db.ts';
-import { asyncHandler } from '../middleware.ts';
-import type { AuthedRequest } from '../types.ts';
-import { EMAIL_MOBILE_COMBO_ERROR, isEmailMobileComboDuplicate, money } from '../util.ts';
+import { hashPassword } from '../auth';
+import { normalizeEmail, normalizeMobile, uniqueReferralCode } from '../customerCodes';
+import { mapCustomer, loadCustomerDetails } from '../customerView';
+import { pool } from '../db';
+import { asyncHandler } from '../middleware';
+import type { AuthedRequest } from '../types';
+import { EMAIL_MOBILE_COMBO_ERROR, isEmailMobileComboDuplicate, money } from '../util';
 
 export const customersRouter = Router();
 

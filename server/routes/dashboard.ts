@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { pool } from '../db.ts';
-import { asyncHandler, requireAuth, requireSuperAdmin } from '../middleware.ts';
-import { money } from '../util.ts';
+import { pool } from '../db';
+import { asyncHandler, requireAuth, requireSuperAdmin } from '../middleware';
+import { money } from '../util';
 
 export const dashboardRouter = Router();
 

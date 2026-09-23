@@ -6,13 +6,13 @@ import {
   signPasswordResetToken,
   verifyAuthToken,
   verifyPassword,
-} from '../auth.ts';
-import { normalizeEmail, normalizeMobile, uniqueReferralCode } from '../customerCodes.ts';
-import { pool } from '../db.ts';
-import { asyncHandler, requireCustomer } from '../middleware.ts';
-import { callElvatechOtp, maskMobileNumber, toOtpPhone } from '../otp.ts';
-import type { CustomerAuth, CustomerRequest } from '../types.ts';
-import { customerPasswordError, isEmailMobileComboDuplicate, EMAIL_MOBILE_COMBO_ERROR, text } from '../util.ts';
+} from '../auth';
+import { normalizeEmail, normalizeMobile, uniqueReferralCode } from '../customerCodes';
+import { pool } from '../db';
+import { asyncHandler, requireCustomer } from '../middleware';
+import { callElvatechOtp, maskMobileNumber, toOtpPhone } from '../otp';
+import type { CustomerAuth, CustomerRequest } from '../types';
+import { customerPasswordError, isEmailMobileComboDuplicate, EMAIL_MOBILE_COMBO_ERROR, text } from '../util';
 
 export const mobileAuthRouter = Router();
 

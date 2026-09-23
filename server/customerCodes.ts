@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { pool } from './db.ts';
+import { pool } from './db';
 
 const REFERRAL_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
