@@ -43,7 +43,14 @@ function resolveDatabaseUrl(): string {
     if (pooler) {
       return `postgresql://postgres.${ref}:${encoded}@${pooler}`;
     }
-    return `postgresql://postgres:${encoded}@db.${ref}.supabase.co:5432/postgres`;
+    // Vercel cannot resolve the IPv6-only db.*.supabase.co host.
+    const usePooler =
+      Boolean(process.env.VERCEL) || process.env.SUPABASE_USE_POOLER === '1';
+    if (usePooler) {
+      const region = (process.env.SUPABASE_REGION ?? 'ap-south-1').trim();
+      return `postgresql://postgres.${ref}:${encoded}@aws-0-${region}.pooler.supabase.com:6543/postgres?sslmode=require`;
+    }
+    return `postgresql://postgres:${encoded}@db.${ref}.supabase.co:5432/postgres?sslmode=require`;
   }
 
   const explicit = process.env.DATABASE_URL?.trim();
@@ -63,7 +70,7 @@ export const config = {
     return resolveDatabaseUrl();
   },
   get databaseSsl() {
-    return /supabase\.co|sslmode=require/i.test(this.databaseUrl);
+    return /supabase\.(co|com)|pooler\.supabase|sslmode=require/i.test(this.databaseUrl);
   },
   get jwtSecret() {
     return required('JWT_SECRET');
