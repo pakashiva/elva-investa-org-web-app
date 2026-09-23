@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { app } from '../server/app';
+import { ensureReady } from '../server/ready';
 
 function sendJson(res: ServerResponse, status: number, body: Record<string, unknown>) {
   if (res.headersSent) {
@@ -7,20 +9,6 @@ function sendJson(res: ServerResponse, status: number, body: Record<string, unkn
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(body));
-}
-
-function missingEnv(): string[] {
-  const missing: string[] = [];
-  if (!process.env.JWT_SECRET?.trim()) {
-    missing.push('JWT_SECRET');
-  }
-  if (!process.env.SUPABASE_URL?.trim() && !process.env.DATABASE_URL?.trim()) {
-    missing.push('SUPABASE_URL');
-  }
-  if (!process.env.SUPABASE_DB_PASSWORD?.trim() && !process.env.DATABASE_URL?.trim()) {
-    missing.push('SUPABASE_DB_PASSWORD');
-  }
-  return missing;
 }
 
 function restoreApiPath(req: IncomingMessage) {
@@ -32,30 +20,9 @@ function restoreApiPath(req: IncomingMessage) {
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  const url = req.url ?? '/';
-  if (req.method === 'GET' && (url === '/api/health' || url === '/health' || url === '/api')) {
-    const missing = missingEnv();
-    sendJson(res, missing.length ? 503 : 200, {
-      ok: missing.length === 0,
-      missing,
-    });
-    return;
-  }
-
   try {
-    const missing = missingEnv();
-    if (missing.length > 0) {
-      sendJson(res, 500, {
-        error: `Missing Vercel environment variables: ${missing.join(', ')}. Add them under Project Settings → Environment Variables, then redeploy.`,
-      });
-      return;
-    }
-
     restoreApiPath(req);
-    const { app } = await import('../server/app');
-    const { ensureReady } = await import('../server/ready');
     await ensureReady();
-
     await new Promise<void>((resolve, reject) => {
       res.once('finish', resolve);
       res.once('close', resolve);

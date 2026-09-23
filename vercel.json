@@ -3,8 +3,11 @@
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "functions": {
+    "api/health.ts": {
+      "maxDuration": 10
+    },
     "api/[...path].ts": {
-      "includeFiles": "server/sql/**",
+      "includeFiles": "server/**",
       "maxDuration": 30
     }
   }

@@ -32,7 +32,8 @@ function supabaseProjectRef(): string | null {
 }
 
 function resolveDatabaseUrl(): string {
-  const password = process.env.SUPABASE_DB_PASSWORD?.trim();
+  const password =
+    process.env.SUPABASE_DB_PASSWORD?.trim() || process.env.SUPABASE_PASSWORD?.trim();
   const ref = supabaseProjectRef();
   if (password && ref) {
     const encoded = encodeURIComponent(password);
