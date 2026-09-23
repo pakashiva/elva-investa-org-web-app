@@ -9,10 +9,10 @@
     "dev:web": "vite",
     "db:up": "echo Cloud Postgres is configured via .env SUPABASE_DB_PASSWORD. Docker is no longer used.",
     "db:down": "echo Cloud Postgres is configured via .env. Docker is no longer used.",
-    "build": "tsc -b && vite build",
+    "build": "tsc -p tsconfig.app.json --pretty false && vite build",
     "start": "tsx server/index.ts",
     "preview": "vite preview",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -p tsconfig.app.json --pretty false && tsc -p tsconfig.json --pretty false && tsc -p tsconfig.node.json --pretty false"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

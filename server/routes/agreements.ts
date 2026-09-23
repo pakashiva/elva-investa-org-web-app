@@ -207,6 +207,10 @@ agreementsRouter.get(
   '/cheque-presets',
   asyncHandler(async (req, res) => {
     const { clientId } = (req as AuthedRequest).auth;
+    if (!clientId) {
+      res.status(403).json({ error: 'Client context is required.' });
+      return;
+    }
     const result = await pool.query(
       `SELECT field_kind, field_value, last_used_at
        FROM agreement_cheque_field_presets
@@ -236,6 +240,10 @@ agreementsRouter.post(
   '/cheque-presets',
   asyncHandler(async (req, res) => {
     const { clientId } = (req as AuthedRequest).auth;
+    if (!clientId) {
+      res.status(403).json({ error: 'Client context is required.' });
+      return;
+    }
     const kind = text(req.body?.fieldKind ?? req.body?.field_kind).toLowerCase();
     const value = text(req.body?.fieldValue ?? req.body?.field_value);
     if (!isFieldKind(kind)) {
@@ -255,6 +263,10 @@ agreementsRouter.delete(
   '/cheque-presets',
   asyncHandler(async (req, res) => {
     const { clientId } = (req as AuthedRequest).auth;
+    if (!clientId) {
+      res.status(403).json({ error: 'Client context is required.' });
+      return;
+    }
     const kind = text(req.body?.fieldKind ?? req.query.fieldKind).toLowerCase();
     const value = text(req.body?.fieldValue ?? req.query.fieldValue);
     if (!isFieldKind(kind) || !value) {
@@ -274,6 +286,10 @@ agreementsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const { clientId } = (req as AuthedRequest).auth;
+    if (!clientId) {
+      res.status(403).json({ error: 'Client context is required.' });
+      return;
+    }
     const investmentId = text(req.query.investmentId);
     const renewalId = text(req.query.renewalId);
     if (!isUuid(investmentId)) {
@@ -309,6 +325,10 @@ agreementsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const { clientId } = (req as AuthedRequest).auth;
+    if (!clientId) {
+      res.status(403).json({ error: 'Client context is required.' });
+      return;
+    }
     const investmentId = text(req.body?.investmentId ?? req.body?.investment_id);
     const renewalId = text(req.body?.renewalId ?? req.body?.renewal_id);
     const officeId = text(req.body?.officeId ?? req.body?.office_id);

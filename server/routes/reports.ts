@@ -275,6 +275,10 @@ reportsRouter.post(
   '/build',
   asyncHandler(async (req, res) => {
     const { clientId } = (req as AuthedRequest).auth;
+    if (!clientId) {
+      res.status(403).json({ error: 'Client context is required.' });
+      return;
+    }
     const kind = asKind(text(req.body?.kind));
     const from = text(req.body?.from) || '2000-01-01';
     const to = text(req.body?.to);
