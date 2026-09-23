@@ -38,6 +38,10 @@ app.use('/api/clients', clientsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/client-portal', clientPortalRouter);
 
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Not found.' });
+});
+
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof SyntaxError) {
     res.status(400).json({ error: 'Invalid request body.' });

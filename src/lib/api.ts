@@ -48,7 +48,9 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
     throw new ApiError(
-      'The API is not available on this deployment. Redeploy so /api is served by Express.',
+      response.status >= 500
+        ? 'The API function crashed. In Vercel → Settings → Environment Variables add JWT_SECRET, SUPABASE_URL, and SUPABASE_DB_PASSWORD, then redeploy.'
+        : 'The API is not available on this deployment. Open /api/health and confirm it returns JSON.',
       response.status || 502
     );
   }

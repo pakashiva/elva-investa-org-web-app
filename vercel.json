@@ -1,10 +1,9 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "functions": {
-    "api/index.ts": {
+    "api/[...path].ts": {
       "includeFiles": "server/sql/**",
       "maxDuration": 30
     }
