@@ -8,7 +8,7 @@ import type { AuthUser, UserRole, UserRow } from './types.ts';
 const cookieOptions: CookieOptions = {
   httpOnly: true,
   sameSite: 'lax',
-  secure: false,
+  secure: process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL),
   path: '/',
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };

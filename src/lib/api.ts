@@ -45,6 +45,14 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     credentials: 'include',
   });
 
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    throw new ApiError(
+      'The API is not available on this deployment. Redeploy so /api is served by Express.',
+      response.status || 502
+    );
+  }
+
   const payload = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok) {
     throw new ApiError(payload.error || 'Request failed.', response.status);

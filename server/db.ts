@@ -16,7 +16,8 @@ function sleep(ms: number) {
 
 export async function waitForDatabase() {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 60; attempt += 1) {
+  const attempts = process.env.VERCEL ? 5 : 60;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       await pool.query('SELECT 1');
       if (attempt > 1) {
@@ -25,7 +26,7 @@ export async function waitForDatabase() {
       return;
     } catch (error) {
       lastError = error;
-      console.log(`Waiting for Postgres (${attempt}/60)…`);
+      console.log(`Waiting for Postgres (${attempt}/${attempts})…`);
       await sleep(1000);
     }
   }

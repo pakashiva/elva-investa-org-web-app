@@ -10,6 +10,7 @@
     "db:up": "echo Cloud Postgres is configured via .env SUPABASE_DB_PASSWORD. Docker is no longer used.",
     "db:down": "echo Cloud Postgres is configured via .env. Docker is no longer used.",
     "build": "tsc -b && vite build",
+    "start": "tsx server/index.ts",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false"
   },
