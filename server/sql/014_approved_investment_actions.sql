@@ -1,0 +1,2 @@
+ALTER TABLE bank_accounts
+  ADD COLUMN IF NOT EXISTS branch_name TEXT NOT NULL DEFAULT '';

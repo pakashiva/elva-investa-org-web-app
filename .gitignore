@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+dist-server
+*.local
+.env
+.env.local
+cookies.txt
+tmp-*.json
+.DS_Store
+tsconfig.app.tsbuildinfo
+tsconfig.node.tsbuildinfo

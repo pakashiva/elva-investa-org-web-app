@@ -1,0 +1,76 @@
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+dotenv.config({ path: path.join(rootDir, '.env') });
+
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing ${name} in .env`);
+  }
+  return value;
+}
+
+function supabaseProjectRef(): string | null {
+  const raw =
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+    process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ||
+    '';
+  if (!raw) {
+    return null;
+  }
+  try {
+    const host = new URL(raw).hostname;
+    const ref = host.split('.')[0];
+    return ref || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveDatabaseUrl(): string {
+  const password = process.env.SUPABASE_DB_PASSWORD?.trim();
+  const ref = supabaseProjectRef();
+  if (password && ref) {
+    const encoded = encodeURIComponent(password);
+    const pooler = process.env.SUPABASE_POOLER_HOST?.trim();
+    if (pooler) {
+      return `postgresql://postgres.${ref}:${encoded}@${pooler}`;
+    }
+    return `postgresql://postgres:${encoded}@db.${ref}.supabase.co:5432/postgres`;
+  }
+
+  const explicit = process.env.DATABASE_URL?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  throw new Error(
+    'Set SUPABASE_DB_PASSWORD (Supabase → Project Settings → Database) or DATABASE_URL. The publishable key is not a Postgres password.'
+  );
+}
+
+const databaseUrl = resolveDatabaseUrl();
+
+export const config = {
+  rootDir,
+  port: Number(process.env.PORT ?? 4000),
+  databaseUrl,
+  databaseSsl: /supabase\.co|sslmode=require/i.test(databaseUrl),
+  jwtSecret: required('JWT_SECRET'),
+  cookieName: 'elva_admin_session',
+  superAdmin: {
+    username: (process.env.SUPER_ADMIN_USERNAME ?? 'superadmin').trim().toLowerCase(),
+    password: process.env.SUPER_ADMIN_PASSWORD ?? 'Elva@1234',
+    fullName: process.env.SUPER_ADMIN_NAME ?? 'ELVA Super Admin',
+  },
+  otp: {
+    apiBaseUrl: (process.env.OTP_API_BASE_URL ?? 'https://api.notify.elvatech.in').replace(/\/$/, ''),
+    appId: process.env.OTP_APP_ID ?? 'eNandi',
+    apiKey: process.env.OTP_API_KEY ?? 'eNandi_123',
+    brandId: process.env.OTP_BRAND_ID ?? 'elva-sales',
+  },
+};
