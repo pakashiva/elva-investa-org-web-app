@@ -8,8 +8,8 @@
     "api/health.ts": {
       "maxDuration": 10
     },
-    "api/express.js": {
-      "includeFiles": "server/sql/**",
+    "api/express.ts": {
+      "includeFiles": "{api/handler.bundle.js,server/sql/**}",
       "maxDuration": 30
     }
   }
