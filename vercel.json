@@ -1,13 +1,15 @@
 {
   "rewrites": [
+    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/api/(.*)", "destination": "/api/express?p=$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/health.ts": {
       "maxDuration": 10
     },
-    "api/[...path].ts": {
-      "includeFiles": "server/**",
+    "api/express.ts": {
+      "includeFiles": "server/sql/**",
       "maxDuration": 30
     }
   }

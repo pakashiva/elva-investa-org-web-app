@@ -9,7 +9,7 @@
     "dev:web": "vite",
     "db:up": "echo Cloud Postgres is configured via .env SUPABASE_DB_PASSWORD. Docker is no longer used.",
     "db:down": "echo Cloud Postgres is configured via .env. Docker is no longer used.",
-    "build": "tsc -p tsconfig.app.json --pretty false && vite build",
+    "build": "tsc -p tsconfig.app.json --pretty false && vite build && node scripts/bundle-api.mjs",
     "start": "tsx server/index.ts",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --pretty false && tsc -p tsconfig.json --pretty false && tsc -p tsconfig.node.json --pretty false"
@@ -39,6 +39,7 @@
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
     "concurrently": "^9.2.1",
+    "esbuild": "^0.28.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vite": "^7.1.5"
