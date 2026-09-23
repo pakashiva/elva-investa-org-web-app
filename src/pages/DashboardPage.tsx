@@ -69,7 +69,7 @@ export function DashboardPage() {
             <KpiCard
               label="INACTIVE CLIENTS"
               value={data.kpis.inactiveClients.toLocaleString('en-IN')}
-              subtext="Temporarily disabled"
+              subtext="Closed for customer onboarding"
             />
             <KpiCard
               label="TOTAL CUSTOMERS"
