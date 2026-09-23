@@ -5,15 +5,30 @@ import { config } from './config';
 
 type PoolCtor = typeof pg.Pool;
 
+function withoutSslMode(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete('sslmode');
+    parsed.searchParams.delete('ssl');
+    return parsed.toString().replace(/\/\?$/, '/').replace(/\?$/, '');
+  } catch {
+    return url.replace(/[?&]sslmode=[^&]*/gi, '').replace(/[?&]$/, '');
+  }
+}
+
 function createPool() {
   const Pool: PoolCtor | undefined =
     pg.Pool ?? (pg as unknown as { default?: { Pool: PoolCtor } }).default?.Pool;
   if (!Pool) {
     throw new Error('The pg driver did not load. Check the Vercel Node runtime.');
   }
+  // sslmode=require in the URL makes pg verify CAs and fails on Vercel
+  // with "self-signed certificate in certificate chain".
+  const connectionString = withoutSslMode(config.databaseUrl);
+  const useSsl = config.databaseSsl || Boolean(process.env.VERCEL);
   return new Pool({
-    connectionString: config.databaseUrl,
-    ssl: config.databaseSsl ? { rejectUnauthorized: false } : undefined,
+    connectionString,
+    ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   });
 }
 
