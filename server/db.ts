@@ -3,11 +3,30 @@ import path from 'node:path';
 import pg from 'pg';
 import { config } from './config';
 
-const { Pool } = pg;
+type PoolCtor = typeof pg.Pool;
 
-export const pool = new Pool({
-  connectionString: config.databaseUrl,
-  ssl: config.databaseSsl ? { rejectUnauthorized: false } : undefined,
+function createPool() {
+  const Pool: PoolCtor | undefined =
+    pg.Pool ?? (pg as unknown as { default?: { Pool: PoolCtor } }).default?.Pool;
+  if (!Pool) {
+    throw new Error('The pg driver did not load. Check the Vercel Node runtime.');
+  }
+  return new Pool({
+    connectionString: config.databaseUrl,
+    ssl: config.databaseSsl ? { rejectUnauthorized: false } : undefined,
+  });
+}
+
+let poolInstance: InstanceType<PoolCtor> | undefined;
+
+export const pool = new Proxy({} as InstanceType<PoolCtor>, {
+  get(_target, prop, _receiver) {
+    if (!poolInstance) {
+      poolInstance = createPool();
+    }
+    const value = Reflect.get(poolInstance, prop, poolInstance) as unknown;
+    return typeof value === 'function' ? value.bind(poolInstance) : value;
+  },
 });
 
 function sleep(ms: number) {

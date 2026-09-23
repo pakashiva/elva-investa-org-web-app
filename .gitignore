@@ -3,6 +3,7 @@ dist
 dist-api
 dist-ssr
 dist-server
+api/express.js
 *.local
 .env
 .env.local

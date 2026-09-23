@@ -2,7 +2,7 @@ import * as esbuild from 'esbuild';
 
 await esbuild.build({
   entryPoints: ['server/vercelHandler.ts'],
-  outfile: 'dist-api/handler.js',
+  outfile: 'api/express.js',
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -10,4 +10,4 @@ await esbuild.build({
   logLevel: 'info',
 });
 
-console.log('bundled dist-api/handler.js');
+console.log('bundled api/express.js');

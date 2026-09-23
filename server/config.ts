@@ -2,7 +2,9 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const rootDir = process.env.VERCEL
+  ? process.cwd()
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(rootDir, '.env') });
 
 function required(name: string): string {
@@ -54,14 +56,18 @@ function resolveDatabaseUrl(): string {
   );
 }
 
-const databaseUrl = resolveDatabaseUrl();
-
 export const config = {
   rootDir,
   port: Number(process.env.PORT ?? 4000),
-  databaseUrl,
-  databaseSsl: /supabase\.co|sslmode=require/i.test(databaseUrl),
-  jwtSecret: required('JWT_SECRET'),
+  get databaseUrl() {
+    return resolveDatabaseUrl();
+  },
+  get databaseSsl() {
+    return /supabase\.co|sslmode=require/i.test(this.databaseUrl);
+  },
+  get jwtSecret() {
+    return required('JWT_SECRET');
+  },
   cookieName: 'elva_admin_session',
   superAdmin: {
     username: (process.env.SUPER_ADMIN_USERNAME ?? 'superadmin').trim().toLowerCase(),

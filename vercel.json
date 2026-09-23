@@ -8,7 +8,7 @@
     "api/health.ts": {
       "maxDuration": 10
     },
-    "api/express.ts": {
+    "api/express.js": {
       "includeFiles": "server/sql/**",
       "maxDuration": 30
     }
