@@ -280,6 +280,37 @@ a {
   background: transparent;
 }
 
+.password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrap input {
+  width: 100%;
+  padding-right: 42px !important;
+}
+
+.password-input-toggle {
+  position: absolute;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.password-input-toggle:hover {
+  color: var(--text-primary);
+}
+
 .icon-btn {
   width: 40px;
   height: 40px;
@@ -2037,6 +2068,14 @@ a {
   border: 0;
   background: transparent;
   height: 38px;
+  outline: none;
+}
+
+.report-select input[type='date'] {
+  height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
   outline: none;
 }
 

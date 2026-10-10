@@ -4,6 +4,7 @@ import { AppHeader } from '../components/AppHeader';
 import { useAuth } from '../contexts/AuthContext';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import { portalChangePassword } from '../services/authService';
+import { PasswordInput } from '../components/PasswordInput';
 
 export function ManagePasswordsPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
@@ -70,9 +71,8 @@ export function ManagePasswordsPage() {
 
         <label className="settings-field">
           <span>Current Password</span>
-          <input
+          <PasswordInput
             className="settings-input"
-            type="password"
             autoComplete="current-password"
             value={oldPassword}
             onChange={(event) => setOldPassword(event.target.value)}
@@ -82,9 +82,8 @@ export function ManagePasswordsPage() {
 
         <label className="settings-field">
           <span>New Password</span>
-          <input
+          <PasswordInput
             className="settings-input"
-            type="password"
             autoComplete="new-password"
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
@@ -94,9 +93,8 @@ export function ManagePasswordsPage() {
 
         <label className="settings-field">
           <span>Confirm New Password</span>
-          <input
+          <PasswordInput
             className="settings-input"
-            type="password"
             autoComplete="new-password"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}

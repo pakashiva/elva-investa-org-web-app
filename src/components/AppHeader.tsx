@@ -38,7 +38,7 @@ export function AppHeader({
 
       <div className="header-tools">
         {isClientAdmin && showSearch ? (
-          <form className="search-pill" action="/customers">
+          <form className="search-pill" onSubmit={(event) => event.preventDefault()}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
               <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
               <path d="M20 20L17 17" stroke="currentColor" strokeWidth="2" />

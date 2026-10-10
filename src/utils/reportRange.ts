@@ -37,3 +37,33 @@ export function resolveReportRange(preset: ReportDatePreset): {
   const from = isoDate(addDays(today, -days));
   return { from, to, label: `${formatDate(from)} - ${formatDate(to)}` };
 }
+
+/** Today through today+31 (covers the next payout cycle for all payout_day values). */
+export function resolveUpcomingPayoutRange(): {
+  from: string;
+  to: string;
+  label: string;
+} {
+  const today = new Date();
+  const from = isoDate(today);
+  const to = isoDate(addDays(today, 31));
+  return {
+    from,
+    to,
+    label: `Next 31 days (${formatDate(from)} - ${formatDate(to)})`,
+  };
+}
+
+export function resolveCustomReportRange(from: string, to: string): {
+  from: string;
+  to: string;
+  label: string;
+} {
+  if (!from || !to) {
+    throw new Error('Choose both From and To dates.');
+  }
+  if (from > to) {
+    throw new Error('From date must be on or before To date.');
+  }
+  return { from, to, label: `${formatDate(from)} - ${formatDate(to)}` };
+}

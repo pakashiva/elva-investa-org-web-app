@@ -9,6 +9,7 @@ import {
 } from '../agreementParty';
 import { AppHeader } from '../components/AppHeader';
 import { AgreementPartyFields } from '../components/AgreementPartyFields';
+import { PasswordInput } from '../components/PasswordInput';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import { createClient } from '../services/clientService';
 import type { ClientStatus } from '../types/platform';
@@ -227,9 +228,8 @@ export function CreateClientPage() {
         <div className="settings-row">
           <label className="settings-field">
             <span>Admin password</span>
-            <input
+            <PasswordInput
               className="settings-input"
-              type="password"
               autoComplete="new-password"
               value={form.adminPassword}
               onChange={(event) => update('adminPassword', event.target.value)}
@@ -238,9 +238,8 @@ export function CreateClientPage() {
           </label>
           <label className="settings-field">
             <span>Confirm password</span>
-            <input
+            <PasswordInput
               className="settings-input"
-              type="password"
               autoComplete="new-password"
               value={form.confirmPassword}
               onChange={(event) => update('confirmPassword', event.target.value)}

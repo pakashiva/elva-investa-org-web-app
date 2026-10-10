@@ -184,21 +184,25 @@ export function SettingsPage() {
             </p>
             <div className="settings-row">
               <div className="settings-field">
-                <span>Client</span>
-                <p className="settings-readonly">
-                  {settings.clientName} ({settings.clientCode})
-                </p>
+                <span>Client name</span>
+                <p className="settings-readonly">{settings.clientName}</p>
               </div>
               <div className="settings-field">
-                <span>Payout day</span>
-                <p className="settings-readonly">{settings.defaultPayoutDay}</p>
+                <span>Client code</span>
+                <p className="settings-readonly">{settings.clientCode}</p>
               </div>
             </div>
             <div className="settings-row">
               <div className="settings-field">
+                <span>Payout day</span>
+                <p className="settings-readonly">{settings.defaultPayoutDay}</p>
+              </div>
+              <div className="settings-field">
                 <span>Minimum investment</span>
                 <p className="settings-readonly">{formatInr(settings.minInvestmentAmount)}</p>
               </div>
+            </div>
+            <div className="settings-row">
               <div className="settings-field">
                 <span>Maximum investment</span>
                 <p className="settings-readonly">{formatInr(settings.maxInvestmentAmount)}</p>
@@ -209,6 +213,8 @@ export function SettingsPage() {
                 <span>Agreement charges</span>
                 <p className="settings-readonly">{formatInr(settings.agreementCharges)}</p>
               </div>
+            </div>
+            <div className="settings-row">
               <div className="settings-field">
                 <span>Interest / TDS</span>
                 <p className="settings-readonly">
@@ -216,8 +222,6 @@ export function SettingsPage() {
                   {formatPercent(settings.defaultTdsPercent)} TDS
                 </p>
               </div>
-            </div>
-            <div className="settings-row">
               <div className="settings-field">
                 <span>Referral commission</span>
                 <p className="settings-readonly">
@@ -225,6 +229,8 @@ export function SettingsPage() {
                   {formatPercent(settings.referralTdsRate)} TDS
                 </p>
               </div>
+            </div>
+            <div className="settings-row">
               <div className="settings-field">
                 <span>Currency</span>
                 <p className="settings-readonly">{settings.defaultCurrency}</p>
@@ -292,6 +298,7 @@ export function SettingsPage() {
         <div className="settings-preset-grid">
           <ChequePresetColumn
             title="Cheque numbers"
+            numericOnly
             values={presets.cheque_nos}
             draft={newChequeNo}
             onDraft={setNewChequeNo}
@@ -325,6 +332,7 @@ export function SettingsPage() {
 
 function ChequePresetColumn({
   title,
+  numericOnly = false,
   values,
   draft,
   onDraft,
@@ -333,6 +341,7 @@ function ChequePresetColumn({
   onRemove,
 }: {
   title: string;
+  numericOnly?: boolean;
   values: string[];
   draft: string;
   onDraft: (value: string) => void;
@@ -342,7 +351,7 @@ function ChequePresetColumn({
 }) {
   return (
     <div className="settings-preset-col">
-      <h3>{title}</h3>
+      <h3>{title} *</h3>
       <ul className="settings-preset-list">
         {values.length === 0 ? <li className="muted">None saved yet</li> : null}
         {values.map((value) => (
@@ -358,7 +367,15 @@ function ChequePresetColumn({
         <input
           className="settings-input"
           value={draft}
-          onChange={(event) => onDraft(event.target.value)}
+          inputMode={numericOnly ? 'numeric' : undefined}
+          required
+          onChange={(event) =>
+            onDraft(
+              numericOnly
+                ? event.target.value.replace(/\D/g, '')
+                : event.target.value
+            )
+          }
           placeholder={`Add ${title.toLowerCase()}`}
         />
         <button type="button" className="primary-btn" disabled={busy || !draft.trim()} onClick={onAdd}>

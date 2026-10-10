@@ -27,7 +27,11 @@ import {
 import type { ReportDatePreset, ReportFormat, ReportKind } from '../types/admin';
 import { adminRoleLabel, firstName, formatDate } from '../utils/format';
 import { downloadReportFile } from '../utils/reportExport';
-import { resolveReportRange } from '../utils/reportRange';
+import {
+  resolveCustomReportRange,
+  resolveReportRange,
+  resolveUpcomingPayoutRange,
+} from '../utils/reportRange';
 
 const CATEGORIES: {
   kind: Exclude<ReportKind, 'bulk'>;
@@ -75,14 +79,14 @@ const CATEGORIES: {
     kind: 'upcoming_payout',
     title: 'Upcoming Payouts (31 Days)',
     description:
-      'All Active investments due for interest — bank, PAN, interest, TDS, and referral commission columns.',
+      'All Active investments due for interest in the next 31 days — bank, PAN, interest, TDS, and referral commission columns.',
     icon: <CalendarClock size={18} />,
   },
   {
     kind: 'payout_range',
     title: 'Payouts by Date Range',
     description:
-      'Same payout layout using the date preset above. Includes customer, bank, interest, TDS, and referral details.',
+      'Same payout layout with your From / To dates below. Includes customer, bank, interest, TDS, and referral details.',
     icon: <CalendarRange size={18} />,
   },
 ];
@@ -93,12 +97,31 @@ function formatLabel(format: ReportFormat): string {
   return 'Excel';
 }
 
+function todayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function plusDaysIso(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function ReportsPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
   const { admin } = useAuth();
   const history = useGeneratedReports();
   const [preset, setPreset] = useState<ReportDatePreset>('last_30');
   const [format, setFormat] = useState<ReportFormat>('xlsx');
+  const [payoutFrom, setPayoutFrom] = useState(todayIso);
+  const [payoutTo, setPayoutTo] = useState(() => plusDaysIso(31));
   const [busy, setBusy] = useState<ReportKind | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -110,7 +133,12 @@ export function ReportsPage() {
     setBusy(kind);
     setActionError(null);
     try {
-      const range = resolveReportRange(preset);
+      const range =
+        kind === 'upcoming_payout'
+          ? resolveUpcomingPayoutRange()
+          : kind === 'payout_range'
+            ? resolveCustomReportRange(payoutFrom, payoutTo)
+            : resolveReportRange(preset);
       const built = await buildReport(kind, range.from, range.to);
       await saveGeneratedReport({
         name: built.name,
@@ -189,6 +217,26 @@ export function ReportsPage() {
           <Plus size={16} />
           {busy === 'bulk' ? 'Generating…' : 'Generate Bulk Audit Export'}
         </button>
+      </section>
+
+      <section className="report-params report-payout-params">
+        <strong>Payout date range</strong>
+        <label className="report-select">
+          <span>From</span>
+          <input
+            type="date"
+            value={payoutFrom}
+            onChange={(event) => setPayoutFrom(event.target.value)}
+          />
+        </label>
+        <label className="report-select">
+          <span>To</span>
+          <input
+            type="date"
+            value={payoutTo}
+            onChange={(event) => setPayoutTo(event.target.value)}
+          />
+        </label>
       </section>
 
       <section className="report-grid">

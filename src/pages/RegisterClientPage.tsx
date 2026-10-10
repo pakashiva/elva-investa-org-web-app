@@ -8,6 +8,7 @@ import {
   type AgreementPartyForm,
 } from '../agreementParty';
 import { AgreementPartyFields } from '../components/AgreementPartyFields';
+import { PasswordInput } from '../components/PasswordInput';
 import { useAuth } from '../contexts/AuthContext';
 import {
   lookupAdminUsernameAvailability,
@@ -348,8 +349,7 @@ export function RegisterClientPage() {
             </label>
             <label className="create-field">
               <span>Admin password *</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={form.adminPassword}
                 onChange={(event) => update('adminPassword', event.target.value)}
                 autoComplete="new-password"
@@ -358,8 +358,7 @@ export function RegisterClientPage() {
             </label>
             <label className="create-field">
               <span>Confirm password *</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={form.confirmPassword}
                 onChange={(event) => update('confirmPassword', event.target.value)}
                 autoComplete="new-password"

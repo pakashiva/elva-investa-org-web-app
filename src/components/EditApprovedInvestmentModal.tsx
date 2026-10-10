@@ -179,6 +179,20 @@ export function EditApprovedInvestmentModal({
       setError('Account number must be 9 to 18 digits.');
       return;
     }
+    if (form.hasAgreement) {
+      if (!form.chequeNo.trim() || !/^\d+$/.test(form.chequeNo.trim())) {
+        setError('Cheque number is required and must contain digits only.');
+        return;
+      }
+      if (!form.chequeBankName.trim()) {
+        setError('Cheque bank name is required.');
+        return;
+      }
+      if (!form.chequeBankAddress.trim()) {
+        setError('Cheque bank address is required.');
+        return;
+      }
+    }
 
     setSaving(true);
     setError(null);
@@ -511,24 +525,30 @@ export function EditApprovedInvestmentModal({
                       </label>
                     ) : null}
                     <label className="create-field">
-                      <span>Cheque no.</span>
+                      <span>Cheque no. *</span>
                       <input
                         value={form.chequeNo}
-                        onChange={(e) => setField('chequeNo', e.target.value)}
+                        inputMode="numeric"
+                        required
+                        onChange={(e) =>
+                          setField('chequeNo', digitsOnly(e.target.value))
+                        }
                       />
                     </label>
                     <label className="create-field">
-                      <span>Cheque bank name</span>
+                      <span>Cheque bank name *</span>
                       <input
                         value={form.chequeBankName}
+                        required
                         onChange={(e) => setField('chequeBankName', e.target.value)}
                       />
                     </label>
                     <label className="create-field create-field-span">
-                      <span>Cheque bank address</span>
+                      <span>Cheque bank address *</span>
                       <textarea
                         rows={2}
                         value={form.chequeBankAddress}
+                        required
                         onChange={(e) => setField('chequeBankAddress', e.target.value)}
                       />
                     </label>

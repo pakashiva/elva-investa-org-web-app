@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Calendar } from 'lucide-react';
+import { PasswordInput } from '../components/PasswordInput';
 import {
   lookupPublicClient,
   registerPublicCustomer,
@@ -671,8 +672,7 @@ export function RegisterCustomerPage() {
           <div className="create-grid">
             <label className="create-field">
               <span>Password *</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={form.password}
                 onChange={(event) => update('password', event.target.value)}
                 autoComplete="new-password"
@@ -682,8 +682,7 @@ export function RegisterCustomerPage() {
             </label>
             <label className="create-field">
               <span>Confirm password *</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={form.confirmPassword}
                 onChange={(event) => update('confirmPassword', event.target.value)}
                 autoComplete="new-password"

@@ -31,6 +31,7 @@ type SavedFieldProps = {
   options: string[];
   value: string;
   onChange: (value: string) => void;
+  numericOnly?: boolean;
 };
 
 function SavedValueField({
@@ -41,6 +42,7 @@ function SavedValueField({
   options,
   value,
   onChange,
+  numericOnly = false,
 }: SavedFieldProps) {
   const matched = options.find((item) => item === value);
   const selectValue = matched ?? NEW_VALUE;
@@ -66,10 +68,18 @@ function SavedValueField({
       </label>
 
       <label className="create-field">
-        <span>{label}</span>
+        <span>{label} *</span>
         <input
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          inputMode={numericOnly ? 'numeric' : undefined}
+          required
+          onChange={(event) =>
+            onChange(
+              numericOnly
+                ? event.target.value.replace(/\D/g, '')
+                : event.target.value
+            )
+          }
           placeholder={placeholder}
         />
       </label>
@@ -139,6 +149,10 @@ export function AgreementDetailsModal({
     }
     if (!chequeNo.trim()) {
       setLocalError('Enter the cheque number.');
+      return;
+    }
+    if (!/^\d+$/.test(chequeNo.trim())) {
+      setLocalError('Cheque number must contain digits only.');
       return;
     }
     if (!bankName.trim()) {
@@ -226,6 +240,7 @@ export function AgreementDetailsModal({
                 options={presets.cheque_nos}
                 value={chequeNo}
                 onChange={setChequeNo}
+                numericOnly
               />
 
               <SavedValueField
