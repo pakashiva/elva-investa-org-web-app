@@ -81,7 +81,18 @@ withdrawalsRouter.get(
       params.push(`%${search}%`);
       const idx = params.length;
       filters.push(
-        `(c.full_name ILIKE $${idx} OR i.code ILIKE $${idx} OR COALESCE(ba.bank_name, '') ILIKE $${idx})`
+        `(w.id::text ILIKE $${idx}
+          OR COALESCE(w.request_id, '') ILIKE $${idx}
+          OR c.full_name ILIKE $${idx}
+          OR c.customer_code ILIKE $${idx}
+          OR c.mobile_number ILIKE $${idx}
+          OR c.email_address ILIKE $${idx}
+          OR i.code ILIKE $${idx}
+          OR i.name ILIKE $${idx}
+          OR COALESCE(ba.bank_name, '') ILIKE $${idx}
+          OR COALESCE(ba.account_number, '') ILIKE $${idx}
+          OR COALESCE(ba.ifsc_code, '') ILIKE $${idx}
+          OR EXISTS (SELECT 1 FROM kyc_documents kd WHERE kd.customer_id=c.id AND kd.client_id=c.client_id AND COALESCE(kd.pan_number,'') ILIKE $${idx}))`
       );
     }
 

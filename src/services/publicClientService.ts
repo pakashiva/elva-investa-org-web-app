@@ -1,5 +1,6 @@
 import { api, setAdminToken } from '../lib/api';
 import type { AgreementPartyForm } from '../agreementParty';
+import type { BorrowingSetupInput, ClientModule } from '../types/borrowing';
 
 export type PublicClientOnboardRecord = {
   name: string;
@@ -29,6 +30,7 @@ export async function lookupAdminUsernameAvailability(username: string) {
 export type PublicClientRegisterInput = {
   name: string;
   clientCode: string;
+  enabledModules: ClientModule[];
   adminFullName: string;
   adminUsername: string;
   adminPassword: string;
@@ -42,7 +44,8 @@ export type PublicClientRegisterInput = {
   payoutDay: number;
   referralRatePercent: number;
   referralTdsPercent: number;
-  agreementParty: AgreementPartyForm;
+  agreementParty?: AgreementPartyForm;
+  loanProduct?: BorrowingSetupInput;
 };
 
 export async function registerPublicClient(input: PublicClientRegisterInput) {

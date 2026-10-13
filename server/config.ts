@@ -34,6 +34,14 @@ function supabaseProjectRef(): string | null {
 }
 
 function resolveDatabaseUrl(): string {
+  // A full connection string copied from Supabase's Connect dialog is the
+  // source of truth (especially for shared pooler hosts, which cannot be
+  // safely inferred from the project ref and region).
+  const explicit = process.env.DATABASE_URL?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
   const password =
     process.env.SUPABASE_DB_PASSWORD?.trim() || process.env.SUPABASE_PASSWORD?.trim();
   const ref = supabaseProjectRef();
@@ -51,11 +59,6 @@ function resolveDatabaseUrl(): string {
       return `postgresql://postgres.${ref}:${encoded}@aws-0-${region}.pooler.supabase.com:6543/postgres`;
     }
     return `postgresql://postgres:${encoded}@db.${ref}.supabase.co:5432/postgres`;
-  }
-
-  const explicit = process.env.DATABASE_URL?.trim();
-  if (explicit) {
-    return explicit;
   }
 
   throw new Error(

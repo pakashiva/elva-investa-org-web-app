@@ -4,7 +4,7 @@ import { useNavigate, useOutletContext, useParams, useSearchParams } from 'react
 import { AppHeader } from '../components/AppHeader';
 import { CreateCustomerModal } from '../components/CreateCustomerModal';
 import { CustomerDetailsModal } from '../components/CustomerDetailsModal';
-import { EmptyState, ErrorBanner } from '../components/States';
+import { EmptyState, ErrorBanner, FlashMessage } from '../components/States';
 import { useCustomers } from '../hooks/useCustomers';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import type { CustomerFilter, CustomerListRow } from '../types/admin';
@@ -92,7 +92,7 @@ export function CustomersPage() {
       />
 
       {notice ? (
-        <div className={`notice-box${noticeTone === 'success' ? ' success' : ''}`}>{notice}</div>
+        <FlashMessage tone={noticeTone === 'success' ? 'success' : undefined}>{notice}</FlashMessage>
       ) : null}
       {error ? <ErrorBanner message={error} onRetry={() => void reload()} /> : null}
 

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
-import { MoreVertical } from 'lucide-react';
+import { MoreVertical, Search } from 'lucide-react';
 import { AddInvestmentModal } from '../components/AddInvestmentModal';
 import { AgreementDetailsModal } from '../components/AgreementDetailsModal';
 import { AppHeader } from '../components/AppHeader';
 import { EditApprovedInvestmentModal } from '../components/EditApprovedInvestmentModal';
-import { EmptyState, ErrorBanner } from '../components/States';
+import { EmptyState, ErrorBanner, FlashMessage } from '../components/States';
 import { TablePager } from '../components/TablePager';
 import { useInvestmentRequests } from '../hooks/useInvestmentRequests';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
@@ -142,7 +142,6 @@ export function InvestmentRequestsPage() {
       <AppHeader
         title="Investment Requests"
         subtitle="Process and sign off client capital deployments."
-        showSearch
         onOpenMenu={onOpenMenu}
         actions={
           <button type="button" className="primary-btn" onClick={() => setCreateOpen(true)}>
@@ -151,7 +150,7 @@ export function InvestmentRequestsPage() {
         }
       />
 
-      {notice ? <div className="notice-box">{notice}</div> : null}
+      {notice ? <FlashMessage>{notice}</FlashMessage> : null}
       {requests.error ? (
         <ErrorBanner message={requests.error} onRetry={() => void requests.reload()} />
       ) : null}
@@ -170,14 +169,23 @@ export function InvestmentRequestsPage() {
               </button>
             ))}
           </div>
+          <label className="toolbar-search">
+            <Search size={16} />
+            <input
+              value={requests.searchInput}
+              onChange={(event) => requests.setSearchInput(event.target.value)}
+              placeholder="Search customer, request ID, plan, PAN..."
+              aria-label="Search investment requests"
+            />
+          </label>
         </div>
 
         {requests.isLoading ? (
           <div className="state-box">Loading requests…</div>
         ) : rows.length === 0 ? (
           <EmptyState
-            title="No investment requests"
-            message="No matching fund requests for this filter."
+            title="No investment requests found"
+            message="No matching investment requests in the database for this filter."
           />
         ) : (
           <div style={{ overflowX: 'auto' }}>

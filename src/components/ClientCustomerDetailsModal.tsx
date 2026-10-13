@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { EmptyState, ErrorBanner } from './States';
+import { EmptyState, ErrorBanner, FlashMessage } from './States';
 import {
   addCustomerBank,
   getClientCustomer,
@@ -409,7 +409,7 @@ export function ClientCustomerDetailsModal({
 
         {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
         {saveError ? <div className="error-box" style={{ margin: '0 0 12px' }}>{saveError}</div> : null}
-        {notice ? <div className="notice-box success" style={{ margin: '0 0 12px' }}>{notice}</div> : null}
+        {notice ? <FlashMessage tone="success" style={{ margin: '0 0 12px' }}>{notice}</FlashMessage> : null}
 
         {isLoading || !data || !profileForm ? (
           <div className="state-box">{isLoading ? 'Loading customer…' : 'Customer not found'}</div>

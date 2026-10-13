@@ -4,7 +4,7 @@ import { useNavigate, useOutletContext, useParams, useSearchParams } from 'react
 import { AppHeader } from '../components/AppHeader';
 import { CreateCustomerModal } from '../components/CreateCustomerModal';
 import { ClientCustomerDetailsModal } from '../components/ClientCustomerDetailsModal';
-import { EmptyState, ErrorBanner } from '../components/States';
+import { EmptyState, ErrorBanner, FlashMessage } from '../components/States';
 import { TablePager } from '../components/TablePager';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import { listClientCustomers } from '../services/clientCustomerService';
@@ -121,7 +121,7 @@ export function ClientCustomersPage() {
         }
       />
 
-      {notice ? <div className="notice-box success">{notice}</div> : null}
+      {notice ? <FlashMessage tone="success">{notice}</FlashMessage> : null}
       {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       <section className="table-shell">

@@ -9,10 +9,19 @@ import {
 } from '../agreementParty';
 import { AppHeader } from '../components/AppHeader';
 import { AgreementPartyFields } from '../components/AgreementPartyFields';
+import { BorrowingSetupFields } from '../components/BorrowingSetupFields';
+import { ClientModulePicker } from '../components/ClientModulePicker';
 import { PasswordInput } from '../components/PasswordInput';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import { createClient } from '../services/clientService';
 import type { ClientStatus } from '../types/platform';
+import {
+  EMPTY_BORROWING_SETUP,
+  toBorrowingSetupInput,
+  validateBorrowingSetup,
+  type BorrowingSetupForm,
+  type ClientModule,
+} from '../types/borrowing';
 
 const PAYOUT_DAYS = [1, 5, 10, 15, 20, 25];
 
@@ -65,6 +74,8 @@ export function CreateClientPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(INITIAL);
+  const [enabledModules, setEnabledModules] = useState<ClientModule[]>(['invest']);
+  const [loanProduct, setLoanProduct] = useState<BorrowingSetupForm>(EMPTY_BORROWING_SETUP);
   const [party, setParty] = useState<AgreementPartyForm>(EMPTY_AGREEMENT_PARTY);
   const [partyErrors, setPartyErrors] = useState<AgreementPartyErrors>({});
   const [error, setError] = useState<string | null>(null);
@@ -99,11 +110,20 @@ export function CreateClientPage() {
       return;
     }
 
-    const nextPartyErrors = validateAgreementPartyForm(party);
+    const nextPartyErrors = enabledModules.includes('invest')
+      ? validateAgreementPartyForm(party)
+      : {};
     setPartyErrors(nextPartyErrors);
     if (Object.keys(nextPartyErrors).length > 0) {
       setError('Complete the Second Party agreement details.');
       return;
+    }
+    if (enabledModules.includes('borrow')) {
+      const borrowingError = validateBorrowingSetup(loanProduct);
+      if (borrowingError) {
+        setError(borrowingError);
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -111,6 +131,7 @@ export function CreateClientPage() {
       await createClient({
         name: form.name,
         clientCode: form.clientCode,
+        enabledModules,
         status: form.status,
         adminFullName: form.adminFullName,
         adminUsername: form.adminUsername,
@@ -125,7 +146,10 @@ export function CreateClientPage() {
         payoutDay: numberOrZero(form.payoutDay),
         referralRatePercent: numberOrZero(form.referralRatePercent),
         referralTdsPercent: numberOrZero(form.referralTdsPercent),
-        agreementParty: partyPayload(party),
+        agreementParty: enabledModules.includes('invest') ? partyPayload(party) : undefined,
+        loanProduct: enabledModules.includes('borrow')
+          ? toBorrowingSetupInput(loanProduct)
+          : undefined,
       });
       navigate('/clients', { replace: true });
     } catch (err) {
@@ -139,12 +163,14 @@ export function CreateClientPage() {
     <>
       <AppHeader
         title="Add Client"
-        subtitle="Create a trader tenant, one admin login, and investment limits."
+        subtitle="Create a tenant, choose its modules, and configure its products."
         onOpenMenu={onOpenMenu}
       />
 
       <form className="card settings-card client-form" onSubmit={(event) => void onSubmit(event)}>
         {error ? <div className="error-box">{error}</div> : null}
+
+        <ClientModulePicker value={enabledModules} onChange={setEnabledModules} />
 
         <h2>Client</h2>
         <label className="settings-field">
@@ -248,6 +274,7 @@ export function CreateClientPage() {
           </label>
         </div>
 
+        {enabledModules.includes('invest') ? <>
         <h2>Investment product</h2>
         <p className="form-hint">These limits belong to this client only.</p>
         <div className="settings-row">
@@ -342,9 +369,18 @@ export function CreateClientPage() {
             />
           </label>
         </div>
+        </> : null}
 
-        <h2>Loan agreement — Second Party</h2>
-        <AgreementPartyFields values={party} errors={partyErrors} onChange={updateParty} />
+        {enabledModules.includes('borrow') ? (
+          <BorrowingSetupFields value={loanProduct} onChange={setLoanProduct} />
+        ) : null}
+
+        {enabledModules.includes('invest') ? (
+          <>
+            <h2>Loan agreement — Second Party</h2>
+            <AgreementPartyFields values={party} errors={partyErrors} onChange={updateParty} />
+          </>
+        ) : null}
 
         <div className="settings-actions">
           <Link className="settings-reset" to="/clients">

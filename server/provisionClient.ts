@@ -10,6 +10,8 @@ const PAYOUT_DAYS = new Set([1, 5, 10, 15, 20, 25]);
 export type ProvisionClientBody = {
   name?: unknown;
   clientCode?: unknown;
+  enabledModules?: unknown;
+  loanProduct?: unknown;
   status?: unknown;
   adminFullName?: unknown;
   adminUsername?: unknown;
@@ -50,12 +52,28 @@ function percentToRate(value: unknown, fallback: number) {
   return Number((n / 100).toFixed(6));
 }
 
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function enumValue(value: unknown, allowed: string[]) {
+  const next = text(value);
+  return allowed.includes(next) ? next : '';
+}
+
 export async function provisionClient(
   body: ProvisionClientBody,
   options: { createdBy: string | null; forceStatus?: 'active' | 'inactive' }
 ): Promise<ProvisionClientResult> {
   const name = text(body.name);
   const clientCode = text(body.clientCode).toUpperCase();
+  const modules = Array.isArray(body.enabledModules)
+    ? [...new Set(body.enabledModules.map((item) => text(item)))]
+    : ['invest'];
+  const hasInvest = modules.includes('invest');
+  const hasBorrow = modules.includes('borrow');
   const status = (options.forceStatus ?? text(body.status || 'active').toLowerCase()) as string;
   const adminFullName = text(body.adminFullName);
   const adminUsername = text(body.adminUsername).toLowerCase();
@@ -63,21 +81,44 @@ export async function provisionClient(
   const supportEmail = text(body.supportEmail) || null;
   const supportPhoneDigits = text(body.supportPhone).replace(/\D/g, '');
   const supportPhone = supportPhoneDigits || null;
-  const minInvestmentAmount = money(body.minInvestmentAmount);
-  const maxInvestmentAmount = money(body.maxInvestmentAmount);
-  const agreementCharges = money(body.agreementCharges ?? 1000);
+  const minInvestmentAmount = hasInvest ? money(body.minInvestmentAmount) : 1;
+  const maxInvestmentAmount = hasInvest ? money(body.maxInvestmentAmount) : 1;
+  const agreementCharges = hasInvest ? money(body.agreementCharges ?? 1000) : 0;
   const defaultInterestRate = percentToRate(body.interestRatePercent, 0.05);
   const defaultTdsPercent = percentToRate(body.tdsPercent, 0.1);
   const referralRate = percentToRate(body.referralRatePercent, 0.01);
   const referralTdsRate = percentToRate(body.referralTdsPercent, 0.02);
-  const payoutDay = Number(body.payoutDay ?? 10);
+  const payoutDay = hasInvest ? Number(body.payoutDay ?? 10) : 10;
   const party = parseAgreementParty(body as Record<string, unknown>);
+  const loan = objectValue(body.loanProduct);
+  const loanName = text(loan.name);
+  const interestModel = enumValue(loan.interestModel, ['simple', 'flat', 'reducing_balance']);
+  const interestRatePercent = Number(loan.interestRatePercent);
+  const interestRatePeriod = enumValue(loan.interestRatePeriod, ['daily', 'weekly', 'monthly', 'annual']);
+  const interestFrequency = enumValue(loan.interestFrequency, ['daily', 'weekly', 'monthly', 'quarterly', 'at_maturity']);
+  const repaymentModel = enumValue(loan.repaymentModel, ['interest_only', 'principal_and_interest', 'bullet']);
+  const repaymentFrequency = enumValue(loan.repaymentFrequency, ['weekly', 'monthly', 'quarterly', 'at_maturity']);
+  const paymentAllocation = enumValue(loan.paymentAllocation, ['interest_first', 'principal_first']);
+  const gracePeriodDays = Number(loan.gracePeriodDays);
+  const overdueRule = enumValue(loan.overdueRule, ['status_only', 'percentage_charge', 'fixed_charge']);
+  const overdueCharge = Number(loan.overdueCharge);
+  const advancePaymentTreatment = enumValue(loan.advancePaymentTreatment, ['reduce_principal', 'cover_future_dues', 'credit_balance']);
+  const approvalWorkflow = enumValue(loan.approvalWorkflow, ['manual', 'direct_activation']);
+  const closureMode = enumValue(loan.closureMode, ['automatic', 'manual']);
+  const roundingScale = Number(loan.roundingScale);
+  const allowedDocuments = ['aadhaar', 'pan', 'address_proof', 'income_proof', 'bank_statement'];
+  const requiredDocuments = Array.isArray(loan.requiredDocuments)
+    ? [...new Set(loan.requiredDocuments.map((item) => text(item)))]
+    : [];
 
   if (!name) {
     return { ok: false, status: 400, error: 'Client name is required.' };
   }
   if (!/^[A-Z0-9]{3,20}$/.test(clientCode)) {
     return { ok: false, status: 400, error: 'Client code must be 3–20 letters or numbers.' };
+  }
+  if (modules.length === 0 || modules.some((item) => item !== 'invest' && item !== 'borrow')) {
+    return { ok: false, status: 400, error: 'Select Invest, Borrow, or both modules.' };
   }
   if (status !== 'active' && status !== 'inactive') {
     return { ok: false, status: 400, error: 'Status must be active or inactive.' };
@@ -101,26 +142,44 @@ export async function provisionClient(
   if (supportPhone && !/^[6-9]\d{9}$/.test(supportPhone.replace(/\D/g, ''))) {
     return { ok: false, status: 400, error: 'Support phone must be a 10-digit Indian mobile number.' };
   }
-  if (!(minInvestmentAmount > 0) || !(maxInvestmentAmount >= minInvestmentAmount)) {
+  if (hasInvest && (!(minInvestmentAmount > 0) || !(maxInvestmentAmount >= minInvestmentAmount))) {
     return { ok: false, status: 400, error: 'Enter a valid min and max investment. Max must be ≥ min.' };
   }
-  if (!(agreementCharges >= 0) || Number.isNaN(agreementCharges)) {
+  if (hasInvest && (!(agreementCharges >= 0) || Number.isNaN(agreementCharges))) {
     return { ok: false, status: 400, error: 'Enter a valid agreement charge.' };
   }
-  if (
+  if (hasInvest && (
     Number.isNaN(defaultInterestRate) ||
     Number.isNaN(defaultTdsPercent) ||
     Number.isNaN(referralRate) ||
     Number.isNaN(referralTdsRate)
-  ) {
+  )) {
     return { ok: false, status: 400, error: 'Rates must be percentages between 0 and 100.' };
   }
-  if (!PAYOUT_DAYS.has(payoutDay)) {
+  if (hasInvest && !PAYOUT_DAYS.has(payoutDay)) {
     return { ok: false, status: 400, error: 'Payout day must be 1, 5, 10, 15, 20, or 25.' };
   }
-  const partyError = validateAgreementParty(party);
+  const partyError = hasInvest ? validateAgreementParty(party) : null;
   if (partyError) {
     return { ok: false, status: 400, error: partyError };
+  }
+  if (hasBorrow) {
+    const booleansAreSet = ['partPaymentsAllowed', 'receiptRequired', 'writeOffAllowed']
+      .every((key) => typeof loan[key] === 'boolean');
+    if (
+      !loanName || !interestModel || !Number.isFinite(interestRatePercent) || interestRatePercent < 0 || interestRatePercent > 100 ||
+      !interestRatePeriod || !interestFrequency || !repaymentModel || !repaymentFrequency || !paymentAllocation ||
+      !Number.isInteger(gracePeriodDays) || gracePeriodDays < 0 || !overdueRule ||
+      !Number.isFinite(overdueCharge) || overdueCharge < 0 || !booleansAreSet ||
+      !advancePaymentTreatment || !approvalWorkflow || !closureMode || !Number.isInteger(roundingScale) ||
+      roundingScale < 0 || roundingScale > 4 || requiredDocuments.length === 0 ||
+      requiredDocuments.some((document) => !allowedDocuments.includes(document))
+    ) {
+      return { ok: false, status: 400, error: 'Complete all borrowing product and policy settings.' };
+    }
+    if (overdueRule === 'status_only' && overdueCharge !== 0) {
+      return { ok: false, status: 400, error: 'Set overdue charge to 0 when overdue treatment is status only.' };
+    }
   }
 
   const passwordHash = await hashPassword(adminPassword);
@@ -129,10 +188,10 @@ export async function provisionClient(
   try {
     await client.query('BEGIN');
     const created = await client.query(
-      `INSERT INTO clients (name, client_code, status, support_email, support_phone, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO clients (name, client_code, status, support_email, support_phone, created_by, enabled_modules)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::text[])
        RETURNING id`,
-      [name, clientCode, status, supportEmail, supportPhone, options.createdBy]
+      [name, clientCode, status, supportEmail, supportPhone, options.createdBy, modules]
     );
     const clientId = created.rows[0].id as string;
 
@@ -163,6 +222,25 @@ export async function provisionClient(
         party.nomineePhone,
       ]
     );
+
+    if (hasBorrow) {
+      await client.query(
+        `INSERT INTO loan_products (
+           client_id, name, interest_model, interest_rate_percent, interest_rate_period,
+           interest_frequency, repayment_model, repayment_frequency, payment_allocation,
+           grace_period_days, overdue_rule, overdue_charge, part_payments_allowed,
+           advance_payment_treatment, approval_workflow, receipt_required, write_off_allowed,
+           closure_mode, rounding_scale, required_documents
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::text[])`,
+        [
+          clientId, loanName, interestModel, interestRatePercent, interestRatePeriod,
+          interestFrequency, repaymentModel, repaymentFrequency, paymentAllocation,
+          gracePeriodDays, overdueRule, overdueCharge, loan.partPaymentsAllowed,
+          advancePaymentTreatment, approvalWorkflow, loan.receiptRequired, loan.writeOffAllowed,
+          closureMode, roundingScale, requiredDocuments,
+        ]
+      );
+    }
 
     await client.query(
       `INSERT INTO users (username, password_hash, role, client_id, full_name, is_active)

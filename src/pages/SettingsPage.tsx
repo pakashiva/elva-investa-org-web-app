@@ -9,7 +9,7 @@ import {
 } from '../agreementParty';
 import { AppHeader } from '../components/AppHeader';
 import { AgreementPartyFields } from '../components/AgreementPartyFields';
-import { ErrorBanner } from '../components/States';
+import { ErrorBanner, FlashMessage } from '../components/States';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import {
   addChequePreset,
@@ -170,7 +170,7 @@ export function SettingsPage() {
       />
 
       {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
-      {notice ? <div className="notice-box">{notice}</div> : null}
+      {notice ? <FlashMessage>{notice}</FlashMessage> : null}
 
       <section className="card settings-card client-form">
         <h2>Product configuration</h2>

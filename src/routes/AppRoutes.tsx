@@ -20,6 +20,7 @@ import { SettingsPage } from '../pages/SettingsPage';
 import { SuperAdminClientPage } from '../pages/SuperAdminClientPage';
 import { TdsPage } from '../pages/TdsPage';
 import { WithdrawalsPage } from '../pages/WithdrawalsPage';
+import { BorrowingPage } from '../pages/BorrowingPage';
 
 function FullPageLoading() {
   return (
@@ -47,23 +48,24 @@ function SuperAdminRoutes() {
   );
 }
 
-function ClientAdminRoutes() {
+function ClientAdminRoutes({ borrowingEnabled, investingEnabled }: { borrowingEnabled: boolean; investingEnabled: boolean }) {
   return (
     <Routes>
       <Route element={<AdminLayout />}>
         <Route path="/" element={<ClientDashboardPage />} />
         <Route path="/customers" element={<ClientCustomersPage />} />
         <Route path="/customers/:userId" element={<ClientCustomersPage />} />
-        <Route path="/investment-requests" element={<InvestmentRequestsPage />} />
-        <Route path="/investment-requests/renewal/:renewalId" element={<AgreementRenewalReviewPage />} />
-        <Route path="/investment-requests/:requestId" element={<InvestmentReviewPage />} />
-        <Route path="/withdrawals" element={<WithdrawalsPage />} />
-        <Route path="/tds" element={<TdsPage />} />
-        <Route path="/referrals" element={<ReferralsPage />} />
+        {investingEnabled ? <Route path="/investment-requests" element={<InvestmentRequestsPage />} /> : null}
+        {investingEnabled ? <Route path="/investment-requests/renewal/:renewalId" element={<AgreementRenewalReviewPage />} /> : null}
+        {investingEnabled ? <Route path="/investment-requests/:requestId" element={<InvestmentReviewPage />} /> : null}
+        {investingEnabled ? <Route path="/withdrawals" element={<WithdrawalsPage />} /> : null}
+        {investingEnabled ? <Route path="/tds" element={<TdsPage />} /> : null}
+        {investingEnabled ? <Route path="/referrals" element={<ReferralsPage />} /> : null}
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/manage-passwords" element={<ManagePasswordsPage />} />
+        {borrowingEnabled ? <Route path="/borrowing" element={<BorrowingPage />} /> : null}
         <Route path="/contact-ops" element={<ContactOpsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />
@@ -90,7 +92,7 @@ export function AppRoutes() {
   }
 
   if (admin?.role === 'client_admin') {
-    return <ClientAdminRoutes />;
+    return <ClientAdminRoutes borrowingEnabled={admin.enabledModules?.includes('borrow') ?? false} investingEnabled={admin.enabledModules?.includes('invest') ?? true} />;
   }
 
   return <SuperAdminRoutes />;

@@ -28,6 +28,9 @@ function customerPayload(row: CustomerAuth) {
     clientName: row.clientName,
     clientCode: row.clientCode,
     mobileVerified: row.mobileVerified,
+    enabledModules: row.enabledModules,
+    customerType: row.customerType,
+    hasBorrowerAccount: row.hasBorrowerAccount,
   };
 }
 
@@ -35,8 +38,9 @@ async function loadCustomerAuth(customerId: string): Promise<CustomerAuth | null
   const result = await pool.query(
     `SELECT
        c.id, c.full_name, c.mobile_number, c.email_address, c.customer_code,
-       c.referral_code, c.status, c.mobile_verified, c.client_id,
-       cl.name AS client_name, cl.client_code, cl.status AS client_status
+       c.referral_code, c.status, c.mobile_verified, c.client_id,c.customer_type,
+       cl.name AS client_name, cl.client_code, cl.status AS client_status,cl.enabled_modules,
+       EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account
      FROM customers c
      JOIN clients cl ON cl.id = c.client_id
      WHERE c.id = $1
@@ -58,6 +62,9 @@ async function loadCustomerAuth(customerId: string): Promise<CustomerAuth | null
     clientName: row.client_name,
     clientCode: row.client_code,
     mobileVerified: Boolean(row.mobile_verified),
+    enabledModules: row.enabled_modules ?? ['invest'],
+    customerType: row.customer_type ?? 'investor',
+    hasBorrowerAccount: Boolean(row.has_borrower_account),
   };
 }
 
@@ -120,9 +127,15 @@ mobileAuthRouter.get(
       return;
     }
     const result = await pool.query(
-      `SELECT name, client_code, status
-       FROM clients
-       WHERE lower(client_code) = lower($1)
+      `SELECT c.name, c.client_code, c.status, c.enabled_modules,
+              COALESCE(lp.required_documents, ARRAY['aadhaar','pan']::TEXT[]) AS required_documents
+       FROM clients c
+       LEFT JOIN LATERAL (
+         SELECT required_documents FROM loan_products
+         WHERE client_id = c.id AND status = 'active'
+         ORDER BY created_at LIMIT 1
+       ) lp ON TRUE
+       WHERE lower(c.client_code) = lower($1)
        LIMIT 1`,
       [clientCode]
     );
@@ -139,6 +152,8 @@ mobileAuthRouter.get(
       client: {
         name: client.name,
         clientCode: client.client_code,
+        enabledModules: client.enabled_modules ?? ['invest'],
+        requiredBorrowerDocuments: client.required_documents ?? [],
       },
     });
   })
@@ -176,9 +191,11 @@ mobileAuthRouter.post(
       return;
     }
     const clientRow = await pool.query(
-      `SELECT id, name, client_code, status
-       FROM clients
-       WHERE lower(client_code) = lower($1)
+      `SELECT c.id, c.name, c.client_code, c.status, c.enabled_modules,
+              COALESCE(lp.required_documents, ARRAY[]::TEXT[]) AS required_documents
+       FROM clients c
+       LEFT JOIN LATERAL (SELECT required_documents FROM loan_products WHERE client_id=c.id AND status='active' ORDER BY created_at LIMIT 1) lp ON TRUE
+       WHERE lower(c.client_code) = lower($1)
        LIMIT 1`,
       [clientCode]
     );
@@ -192,6 +209,16 @@ mobileAuthRouter.post(
       return;
     }
     const clientId = client.id as string;
+    const enabledModules: string[] = client.enabled_modules ?? ['invest'];
+    const customerType = text(req.body?.customerType || 'investor').toLowerCase();
+    const includesInvest = customerType === 'investor' || customerType === 'both';
+    const includesBorrow = customerType === 'borrower' || customerType === 'both';
+    if (!['investor', 'borrower', 'both'].includes(customerType) ||
+        (includesInvest && !enabledModules.includes('invest')) ||
+        (includesBorrow && !enabledModules.includes('borrow'))) {
+      res.status(400).json({ error: 'Choose an account type enabled by this client.' });
+      return;
+    }
 
     if (!fullName) {
       res.status(400).json({ error: 'Full name is required.' });
@@ -224,19 +251,19 @@ mobileAuthRouter.post(
       res.status(400).json({ error: 'Enter a valid PAN number.' });
       return;
     }
-    if (!accountHolderName || !/^\d{9,18}$/.test(accountNumber)) {
+    if (includesInvest && (!accountHolderName || !/^\d{9,18}$/.test(accountNumber))) {
       res.status(400).json({ error: 'Enter a valid bank account.' });
       return;
     }
-    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode) || !bankName) {
+    if (includesInvest && (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode) || !bankName)) {
       res.status(400).json({ error: 'Enter a valid IFSC code and bank name.' });
       return;
     }
-    if (accountType !== 'Savings' && accountType !== 'Current') {
+    if (includesInvest && accountType !== 'Savings' && accountType !== 'Current') {
       res.status(400).json({ error: 'Account type must be Savings or Current.' });
       return;
     }
-    if (!nomineeName || !relationship || !/^\d{12}$/.test(nomineeAadhaar)) {
+    if (includesInvest && (!nomineeName || !relationship || !/^\d{12}$/.test(nomineeAadhaar))) {
       res.status(400).json({ error: 'Enter nominee name, relationship, and 12-digit Aadhaar.' });
       return;
     }
@@ -263,6 +290,10 @@ mobileAuthRouter.post(
       return;
     }
     if (existing) {
+      await pool.query(`UPDATE customers SET customer_type=$2 WHERE id=$1`, [existing.id, customerType]);
+      if (includesBorrow) {
+        await pool.query(`INSERT INTO borrowers (client_id,customer_id) VALUES ($1,$2) ON CONFLICT (client_id,customer_id) DO NOTHING`, [clientId, existing.id]);
+      }
       sendCustomerSession(res, existing, 200, { resumed: true });
       return;
     }
@@ -275,11 +306,11 @@ mobileAuthRouter.post(
       await db.query('BEGIN');
 
       const created = await db.query(
-        `INSERT INTO customers (
+      `INSERT INTO customers (
            client_id, full_name, mobile_number, email_address, date_of_birth,
            address, city, state, pin_code, password_hash, referral_code,
-           referred_by_customer_id, authorized, status, mobile_verified
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NULL, TRUE, 'active', FALSE)
+           referred_by_customer_id, authorized, status, mobile_verified, customer_type
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NULL, TRUE, 'active', FALSE, $12)
          RETURNING id`,
         [
           clientId,
@@ -293,23 +324,24 @@ mobileAuthRouter.post(
           pinCode,
           passwordHash,
           referralCode,
+          customerType,
         ]
       );
       const customerId = created.rows[0].id as string;
 
-      await db.query(
+      if (aadhaarNumber || panNumber) await db.query(
         `INSERT INTO kyc_documents (client_id, customer_id, aadhaar_number, pan_number)
          VALUES ($1,$2,$3,$4)`,
         [clientId, customerId, aadhaarNumber, panNumber]
       );
-      await db.query(
+      if (includesInvest) await db.query(
         `INSERT INTO bank_accounts (
            client_id, customer_id, account_holder_name, account_number,
            ifsc_code, bank_name, account_type, is_primary
          ) VALUES ($1,$2,$3,$4,$5,$6,$7, TRUE)`,
         [clientId, customerId, accountHolderName, accountNumber, ifscCode, bankName, accountType]
       );
-      await db.query(
+      if (includesInvest) await db.query(
         `INSERT INTO nominees (
            client_id, customer_id, nominee_name, relationship, nominee_aadhaar,
            nominee_mobile, nominee_pan
@@ -325,6 +357,12 @@ mobileAuthRouter.post(
           nomineePan || null,
         ]
       );
+      if (includesBorrow) {
+        await db.query(
+          `INSERT INTO borrowers (client_id, customer_id) VALUES ($1,$2) ON CONFLICT (client_id, customer_id) DO NOTHING`,
+          [clientId, customerId]
+        );
+      }
 
       await db.query('COMMIT');
       const customer = await loadCustomerAuth(customerId);
@@ -383,8 +421,9 @@ mobileAuthRouter.post(
     const result = await pool.query(
       `SELECT
          c.id, c.password_hash, c.status, c.full_name, c.mobile_number, c.email_address,
-         c.customer_code, c.referral_code, c.mobile_verified, c.client_id,
-         cl.name AS client_name, cl.client_code, cl.status AS client_status
+         c.customer_code, c.referral_code, c.mobile_verified, c.client_id,c.customer_type,
+         cl.name AS client_name, cl.client_code, cl.status AS client_status,cl.enabled_modules,
+         EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account
        FROM customers c
        JOIN clients cl ON cl.id = c.client_id
        WHERE ${usingEmail ? 'lower(c.email_address) = $1' : 'c.mobile_number = $1'}
@@ -427,6 +466,9 @@ mobileAuthRouter.post(
       clientName: row.client_name,
       clientCode: row.client_code,
       mobileVerified: Boolean(row.mobile_verified),
+      enabledModules: row.enabled_modules ?? ['invest'],
+      customerType: row.customer_type ?? 'investor',
+      hasBorrowerAccount: Boolean(row.has_borrower_account),
     };
     const token = signCustomerToken(customer.id, customer.mobileNumber, customer.clientId);
     res.json({
@@ -485,8 +527,9 @@ async function findCustomerForRecovery(
   const result = await pool.query(
     `SELECT
        c.id, c.full_name, c.mobile_number, c.email_address, c.customer_code,
-       c.referral_code, c.status, c.mobile_verified, c.client_id,
-       cl.name AS client_name, cl.client_code, cl.status AS client_status
+       c.referral_code, c.status, c.mobile_verified, c.client_id,c.customer_type,
+       cl.name AS client_name, cl.client_code, cl.status AS client_status,cl.enabled_modules,
+       EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account
      FROM customers c
      JOIN clients cl ON cl.id = c.client_id
      WHERE ${usingEmail ? 'lower(c.email_address) = $1' : 'c.mobile_number = $1'}
@@ -522,6 +565,9 @@ async function findCustomerForRecovery(
     clientName: row.client_name,
     clientCode: row.client_code,
     mobileVerified: Boolean(row.mobile_verified),
+    enabledModules: row.enabled_modules ?? ['invest'],
+    customerType: row.customer_type ?? 'investor',
+    hasBorrowerAccount: Boolean(row.has_borrower_account),
   };
 }
 

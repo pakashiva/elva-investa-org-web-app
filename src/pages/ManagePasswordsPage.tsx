@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
 import { portalChangePassword } from '../services/authService';
 import { PasswordInput } from '../components/PasswordInput';
+import { FlashMessage } from '../components/States';
 
 export function ManagePasswordsPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
@@ -59,7 +60,7 @@ export function ManagePasswordsPage() {
       />
 
       {error ? <div className="error-box">{error}</div> : null}
-      {notice ? <div className="notice-box">{notice}</div> : null}
+      {notice ? <FlashMessage>{notice}</FlashMessage> : null}
 
       <form className="card settings-card" onSubmit={(event) => void onSubmit(event)}>
         <h2>Change Password</h2>

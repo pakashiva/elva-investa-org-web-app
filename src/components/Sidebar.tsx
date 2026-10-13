@@ -4,6 +4,7 @@ import {
   Building2,
   FileBarChart,
   Gift,
+  HandCoins,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -81,7 +82,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </NavLink>
             </>
           ) : (
-            CLIENT_NAV.map((item) => {
+            [...CLIENT_NAV.filter((item) => admin?.enabledModules?.includes('invest') !== false || !['/investment-requests', '/withdrawals', '/tds', '/referrals'].includes(item.to)), ...(admin?.enabledModules?.includes('borrow') ? [{ to: '/borrowing', label: 'Borrowing', end: false, icon: HandCoins }] : [])].map((item) => {
               const Icon = item.icon;
               return (
                 <NavLink

@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Search } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
 import { AddWithdrawalModal } from '../components/AddWithdrawalModal';
 import { AppHeader } from '../components/AppHeader';
 import { DecisionResultModal } from '../components/DecisionResultModal';
-import { EmptyState, ErrorBanner } from '../components/States';
+import { EmptyState, ErrorBanner, FlashMessage } from '../components/States';
 import { TablePager } from '../components/TablePager';
 import { useWithdrawals } from '../hooks/useWithdrawals';
 import type { AdminOutletContext } from '../layouts/AdminLayout';
@@ -87,7 +87,6 @@ export function WithdrawalsPage() {
       <AppHeader
         title="Withdrawal Requests"
         subtitle="Authorise and process customer withdrawal requests."
-        showSearch
         onOpenMenu={onOpenMenu}
         actions={
           <button type="button" className="primary-btn" onClick={() => setCreateOpen(true)}>
@@ -96,7 +95,7 @@ export function WithdrawalsPage() {
         }
       />
 
-      {notice ? <div className="notice-box">{notice}</div> : null}
+      {notice ? <FlashMessage>{notice}</FlashMessage> : null}
 
       {withdrawals.error ? (
         <ErrorBanner message={withdrawals.error} onRetry={() => void withdrawals.reload()} />
@@ -122,14 +121,23 @@ export function WithdrawalsPage() {
               </button>
             ))}
           </div>
+          <label className="toolbar-search">
+            <Search size={16} />
+            <input
+              value={withdrawals.searchInput}
+              onChange={(event) => withdrawals.setSearchInput(event.target.value)}
+              placeholder="Search customer, request ID, investment, bank..."
+              aria-label="Search withdrawal requests"
+            />
+          </label>
         </div>
 
         {withdrawals.isLoading ? (
           <div className="state-box">Loading withdrawals…</div>
         ) : rows.length === 0 ? (
           <EmptyState
-            title="No withdrawal requests"
-            message="No matching payout requests for this filter."
+            title="No withdrawal requests found"
+            message="No matching withdrawal requests in the database for this filter."
           />
         ) : (
           <div style={{ overflowX: 'auto' }}>

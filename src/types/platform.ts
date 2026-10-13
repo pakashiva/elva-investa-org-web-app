@@ -1,4 +1,5 @@
 import type { AgreementPartyForm } from '../agreementParty';
+import type { BorrowingSetupInput, ClientModule } from './borrowing';
 
 export type AdminRole = 'super_admin' | 'client_admin';
 
@@ -13,6 +14,7 @@ export type AdminMe = {
   clientId: string | null;
   clientName: string | null;
   clientCode: string | null;
+  enabledModules: ClientModule[];
 };
 
 export type ClientStatus = 'active' | 'inactive';
@@ -22,6 +24,7 @@ export type ClientRecord = {
   name: string;
   clientCode: string;
   status: ClientStatus;
+  enabledModules: ClientModule[];
   supportEmail: string | null;
   supportPhone: string | null;
   adminFullName: string;
@@ -45,6 +48,7 @@ export type ClientRecord = {
 export type CreateClientInput = {
   name: string;
   clientCode: string;
+  enabledModules: ClientModule[];
   status: ClientStatus;
   adminFullName: string;
   adminUsername: string;
@@ -59,7 +63,8 @@ export type CreateClientInput = {
   payoutDay: number;
   referralRatePercent: number;
   referralTdsPercent: number;
-  agreementParty: AgreementPartyForm;
+  agreementParty?: AgreementPartyForm;
+  loanProduct?: BorrowingSetupInput;
 };
 
 export type PlatformKpis = {

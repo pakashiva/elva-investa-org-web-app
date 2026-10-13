@@ -8,6 +8,8 @@ import {
   type AgreementPartyForm,
 } from '../agreementParty';
 import { AgreementPartyFields } from '../components/AgreementPartyFields';
+import { BorrowingSetupFields } from '../components/BorrowingSetupFields';
+import { ClientModulePicker } from '../components/ClientModulePicker';
 import { PasswordInput } from '../components/PasswordInput';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -15,6 +17,13 @@ import {
   lookupClientCodeAvailability,
   registerPublicClient,
 } from '../services/publicClientService';
+import {
+  EMPTY_BORROWING_SETUP,
+  toBorrowingSetupInput,
+  validateBorrowingSetup,
+  type BorrowingSetupForm,
+  type ClientModule,
+} from '../types/borrowing';
 
 const PAYOUT_DAYS = [1, 5, 10, 15, 20, 25];
 
@@ -65,7 +74,7 @@ function numberOrZero(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function validate(form: FormState): FieldErrors {
+function validate(form: FormState, enabledModules: ClientModule[]): FieldErrors {
   const errors: FieldErrors = {};
   if (!form.name.trim()) errors.name = 'Client name is required.';
   if (!/^[A-Z0-9]{3,20}$/.test(form.clientCode.trim().toUpperCase())) {
@@ -83,11 +92,13 @@ function validate(form: FormState): FieldErrors {
   if (form.supportPhone.trim() && !/^[6-9]\d{9}$/.test(form.supportPhone.replace(/\D/g, ''))) {
     errors.supportPhone = 'Enter a 10-digit Indian mobile number.';
   }
-  const min = numberOrZero(form.minInvestmentAmount);
-  const max = numberOrZero(form.maxInvestmentAmount);
-  if (!(min > 0)) errors.minInvestmentAmount = 'Enter a minimum greater than 0.';
-  if (!(max >= min)) errors.maxInvestmentAmount = 'Maximum must be at least the minimum.';
-  if (numberOrZero(form.agreementCharges) < 0) errors.agreementCharges = 'Enter a valid charge.';
+  if (enabledModules.includes('invest')) {
+    const min = numberOrZero(form.minInvestmentAmount);
+    const max = numberOrZero(form.maxInvestmentAmount);
+    if (!(min > 0)) errors.minInvestmentAmount = 'Enter a minimum greater than 0.';
+    if (!(max >= min)) errors.maxInvestmentAmount = 'Maximum must be at least the minimum.';
+    if (numberOrZero(form.agreementCharges) < 0) errors.agreementCharges = 'Enter a valid charge.';
+  }
   if (!form.authorized) errors.authorized = 'Confirm you are authorised to board this trader.';
   return errors;
 }
@@ -96,6 +107,8 @@ export function RegisterClientPage() {
   const navigate = useNavigate();
   const { refresh, signIn } = useAuth();
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [enabledModules, setEnabledModules] = useState<ClientModule[]>(['invest']);
+  const [loanProduct, setLoanProduct] = useState<BorrowingSetupForm>(EMPTY_BORROWING_SETUP);
   const [party, setParty] = useState<AgreementPartyForm>(EMPTY_AGREEMENT_PARTY);
   const [partyErrors, setPartyErrors] = useState<AgreementPartyErrors>({});
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -198,19 +211,28 @@ export function RegisterClientPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setSubmitError(null);
-    const nextErrors = validate(form);
-    const nextPartyErrors = validateAgreementPartyForm(party);
+    const nextErrors = validate(form, enabledModules);
+    const nextPartyErrors = enabledModules.includes('invest')
+      ? validateAgreementPartyForm(party)
+      : {};
+    const borrowingError = enabledModules.includes('borrow')
+      ? validateBorrowingSetup(loanProduct)
+      : null;
     if (codeStatus === 'error') nextErrors.clientCode = codeMessage ?? 'That client code is taken.';
     if (userStatus === 'error') nextErrors.adminUsername = userMessage ?? 'That username is taken.';
     setErrors(nextErrors);
     setPartyErrors(nextPartyErrors);
-    if (Object.keys(nextErrors).length > 0 || Object.keys(nextPartyErrors).length > 0) return;
+    if (Object.keys(nextErrors).length > 0 || Object.keys(nextPartyErrors).length > 0 || borrowingError) {
+      if (borrowingError) setSubmitError(borrowingError);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
       const boarded = await registerPublicClient({
         name: form.name.trim(),
         clientCode,
+        enabledModules,
         adminFullName: form.adminFullName.trim(),
         adminUsername,
         adminPassword: form.adminPassword,
@@ -224,7 +246,10 @@ export function RegisterClientPage() {
         payoutDay: numberOrZero(form.payoutDay),
         referralRatePercent: numberOrZero(form.referralRatePercent),
         referralTdsPercent: numberOrZero(form.referralTdsPercent),
-        agreementParty: partyPayload(party),
+        agreementParty: enabledModules.includes('invest') ? partyPayload(party) : undefined,
+        loanProduct: enabledModules.includes('borrow')
+          ? toBorrowingSetupInput(loanProduct)
+          : undefined,
       });
       if (boarded.token) {
         await refresh();
@@ -311,6 +336,8 @@ export function RegisterClientPage() {
           </div>
         </section>
 
+        <ClientModulePicker value={enabledModules} onChange={setEnabledModules} />
+
         <section className="create-section">
           <h3>Client Admin</h3>
           <p className="form-hint">One username and one password for this trader.</p>
@@ -368,7 +395,7 @@ export function RegisterClientPage() {
           </div>
         </section>
 
-        <section className="create-section">
+        {enabledModules.includes('invest') ? <section className="create-section">
           <h3>Investment product</h3>
           <p className="form-hint">These limits belong to this client only.</p>
           <div className="create-grid">
@@ -445,12 +472,18 @@ export function RegisterClientPage() {
               />
             </label>
           </div>
-        </section>
+        </section> : null}
 
-        <section className="create-section">
-          <h3>Loan agreement — Second Party</h3>
-          <AgreementPartyFields values={party} errors={partyErrors} onChange={updateParty} />
-        </section>
+        {enabledModules.includes('borrow') ? (
+          <BorrowingSetupFields value={loanProduct} onChange={setLoanProduct} />
+        ) : null}
+
+        {enabledModules.includes('invest') ? (
+          <section className="create-section">
+            <h3>Loan agreement — Second Party</h3>
+            <AgreementPartyFields values={party} errors={partyErrors} onChange={updateParty} />
+          </section>
+        ) : null}
 
         <label className="register-consent">
           <input

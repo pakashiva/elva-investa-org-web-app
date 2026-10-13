@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Calendar } from 'lucide-react';
+import type { CustomerType } from '../types/borrowing';
 import { PasswordInput } from '../components/PasswordInput';
 import {
   lookupPublicClient,
@@ -132,7 +133,7 @@ function validateDob(value: string): string | null {
   return null;
 }
 
-function validateForm(form: FormState, client: PublicClientSummary | null): FieldErrors {
+function validateForm(form: FormState, client: PublicClientSummary | null, customerType: CustomerType): FieldErrors {
   const errors: FieldErrors = {};
   if (!/^[A-Z0-9]{3,20}$/.test(form.clientCode.trim().toUpperCase())) {
     errors.clientCode = 'Enter your trader’s client code.';
@@ -155,25 +156,29 @@ function validateForm(form: FormState, client: PublicClientSummary | null): Fiel
   if (form.pinCode && !/^\d{6}$/.test(digitsOnly(form.pinCode))) {
     errors.pinCode = 'PIN code must be 6 digits.';
   }
-  if (!form.nomineeName.trim()) errors.nomineeName = 'Nominee name is required.';
-  if (!form.nomineeRelationship) errors.nomineeRelationship = 'Select a relationship.';
-  if (digitsOnly(form.nomineeAadhaar).length !== 12) {
+  if (customerType !== 'borrower' && !form.nomineeName.trim()) errors.nomineeName = 'Nominee name is required.';
+  if (customerType !== 'borrower' && !form.nomineeRelationship) errors.nomineeRelationship = 'Select a relationship.';
+  if (customerType !== 'borrower' && digitsOnly(form.nomineeAadhaar).length !== 12) {
     errors.nomineeAadhaar = 'Nominee Aadhaar must be 12 digits.';
   }
-  const nomineePanError = validatePan(form.nomineePan, 'Nominee PAN');
-  if (nomineePanError) errors.nomineePan = nomineePanError;
-  if (!/^[6-9]\d{9}$/.test(digitsOnly(form.nomineeMobile))) {
+  if (customerType !== 'borrower') {
+    const nomineePanError = validatePan(form.nomineePan, 'Nominee PAN');
+    if (nomineePanError) errors.nomineePan = nomineePanError;
+  }
+  if (customerType !== 'borrower' && !/^[6-9]\d{9}$/.test(digitsOnly(form.nomineeMobile))) {
     errors.nomineeMobile = 'Enter a valid 10-digit nominee mobile.';
   }
-  if (!form.accountHolderName.trim()) errors.accountHolderName = 'Account holder name is required.';
-  if (!/^\d{9,18}$/.test(digitsOnly(form.accountNumber))) {
+  if (customerType !== 'borrower' && !form.accountHolderName.trim()) errors.accountHolderName = 'Account holder name is required.';
+  if (customerType !== 'borrower' && !/^\d{9,18}$/.test(digitsOnly(form.accountNumber))) {
     errors.accountNumber = 'Account number must be 9 to 18 digits.';
   }
-  const ifscError = validateIfsc(form.ifscCode);
-  if (ifscError) errors.ifscCode = ifscError;
-  if (!form.bankName.trim()) errors.bankName = 'Bank name is required.';
-  if (!form.branchName.trim()) errors.branchName = 'Branch name is required.';
-  if (!form.accountType) errors.accountType = 'Select account type.';
+  if (customerType !== 'borrower') {
+    const ifscError = validateIfsc(form.ifscCode);
+    if (ifscError) errors.ifscCode = ifscError;
+    if (!form.bankName.trim()) errors.bankName = 'Bank name is required.';
+    if (!form.branchName.trim()) errors.branchName = 'Branch name is required.';
+    if (!form.accountType) errors.accountType = 'Select account type.';
+  }
   if (form.password.length < 8) errors.password = 'Password must be at least 8 characters.';
   if (form.password !== form.confirmPassword) {
     errors.confirmPassword = 'Passwords do not match.';
@@ -191,6 +196,7 @@ export function RegisterCustomerPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [client, setClient] = useState<PublicClientSummary | null>(null);
+  const [customerType, setCustomerType] = useState<CustomerType>('investor');
   const [clientStatus, setClientStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [clientMessage, setClientMessage] = useState<string | null>(null);
   const [created, setCreated] = useState<PublicCustomerRecord | null>(null);
@@ -219,6 +225,7 @@ export function RegisterCustomerPage() {
         .then((row) => {
           if (cancelled) return;
           setClient(row);
+          setCustomerType(row.enabledModules.includes('invest') ? 'investor' : 'borrower');
           setClientStatus('ready');
           setClientMessage(`Joining ${row.name}`);
           setErrors((prev) => {
@@ -265,7 +272,7 @@ export function RegisterCustomerPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setSubmitError(null);
-    const nextErrors = validateForm(form, client);
+    const nextErrors = validateForm(form, client, customerType);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0 || !client) {
       return;
@@ -275,6 +282,7 @@ export function RegisterCustomerPage() {
     try {
       const customer = await registerPublicCustomer({
         clientCode: client.clientCode,
+        customerType,
         referredByCode: form.referredByCode.trim().toUpperCase() || undefined,
         fullName: form.fullName.trim(),
         email: form.email.trim(),
@@ -315,7 +323,7 @@ export function RegisterCustomerPage() {
           <img src="/logo-mark.png" alt="" width={48} height={48} />
           <h1>You are boarded</h1>
           <p>
-            Your investor profile is now with <strong>{created.clientName}</strong> (
+            Your customer profile is now with <strong>{created.clientName}</strong> (
             {created.clientCode}).
           </p>
           <dl className="register-success-meta">
@@ -395,6 +403,23 @@ export function RegisterCustomerPage() {
             </label>
           </div>
         </section>
+
+        {client ? (
+          <section className="create-section">
+            <h3>Account type</h3>
+            <label className="create-field">
+              <span>What would you like to join as? *</span>
+              <select value={customerType} onChange={(event) => setCustomerType(event.target.value as CustomerType)}>
+                {client.enabledModules.includes('invest') ? <option value="investor">Investor</option> : null}
+                {client.enabledModules.includes('borrow') ? <option value="borrower">Borrower</option> : null}
+                {client.enabledModules.includes('invest') && client.enabledModules.includes('borrow') ? <option value="both">Investor and borrower</option> : null}
+              </select>
+            </label>
+            {customerType !== 'investor' ? (
+              <small className="field-hint">Borrower accounts require Aadhaar and PAN for your client’s records. Loan amount and repayment choices are collected when you request a loan.</small>
+            ) : null}
+          </section>
+        ) : null}
 
         <section className="create-section">
           <h3>Personal details</h3>
@@ -523,7 +548,7 @@ export function RegisterCustomerPage() {
           </div>
         </section>
 
-        <section className="create-section">
+        {customerType !== 'borrower' ? <section className="create-section">
           <h3>Nominee</h3>
           <div className="create-grid">
             <label className="create-field">
@@ -592,9 +617,9 @@ export function RegisterCustomerPage() {
               {errors.nomineeMobile ? <em>{errors.nomineeMobile}</em> : null}
             </label>
           </div>
-        </section>
+        </section> : null}
 
-        <section className="create-section">
+        {customerType !== 'borrower' ? <section className="create-section">
           <h3>Bank details</h3>
           <div className="create-grid">
             <label className="create-field">
@@ -665,7 +690,7 @@ export function RegisterCustomerPage() {
               {errors.accountType ? <em>{errors.accountType}</em> : null}
             </label>
           </div>
-        </section>
+        </section> : null}
 
         <section className="create-section">
           <h3>Password</h3>

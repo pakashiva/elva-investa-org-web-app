@@ -1,5 +1,6 @@
 import { api, setAdminToken } from '../lib/api';
 import type { AdminMe } from '../types/platform';
+import type { ClientModule } from '../types/borrowing';
 
 type AuthPayload = {
   id: string;
@@ -9,6 +10,7 @@ type AuthPayload = {
   clientId: string | null;
   clientName: string | null;
   clientCode: string | null;
+  enabledModules?: ClientModule[];
 };
 
 function toAdmin(user: AuthPayload): AdminMe {
@@ -23,6 +25,7 @@ function toAdmin(user: AuthPayload): AdminMe {
     clientId: user.clientId ?? null,
     clientName: user.clientName ?? null,
     clientCode: user.clientCode ?? null,
+    enabledModules: user.enabledModules ?? ['invest'],
   };
 }
 

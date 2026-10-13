@@ -1,8 +1,11 @@
 import { api } from '../lib/api';
+import type { ClientModule, CustomerType } from '../types/borrowing';
 
 export type PublicClientSummary = {
   name: string;
   clientCode: string;
+  enabledModules: ClientModule[];
+  requiredBorrowerDocuments: string[];
 };
 
 export type PublicCustomerRecord = {
@@ -27,6 +30,7 @@ export async function lookupPublicClient(code: string) {
 
 export type PublicCustomerRegisterInput = {
   clientCode: string;
+  customerType: CustomerType;
   referredByCode?: string;
   fullName: string;
   email: string;

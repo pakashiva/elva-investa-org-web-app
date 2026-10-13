@@ -9,6 +9,7 @@
     "dev:web": "vite",
     "db:up": "echo Cloud Postgres is configured via .env SUPABASE_DB_PASSWORD. Docker is no longer used.",
     "db:down": "echo Cloud Postgres is configured via .env. Docker is no longer used.",
+    "db:migrate": "tsx server/migrate.ts",
     "build": "tsc -p tsconfig.app.json --pretty false && vite build && node scripts/bundle-api.mjs",
     "start": "tsx server/index.ts",
     "preview": "vite preview",

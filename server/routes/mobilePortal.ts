@@ -9,6 +9,239 @@ export const mobilePortalRouter = Router();
 
 mobilePortalRouter.use(requireCustomer);
 
+mobilePortalRouter.get('/account-capabilities', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const result = await pool.query(`SELECT c.customer_type,cl.enabled_modules,
+      EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account,
+      EXISTS(SELECT 1 FROM borrowers b JOIN loans l ON l.borrower_id=b.id AND l.client_id=b.client_id
+        WHERE b.client_id=c.client_id AND b.customer_id=c.id AND l.status IN ('pending_approval','approved','active','overdue')) AS has_open_loan
+    FROM customers c JOIN clients cl ON cl.id=c.client_id
+    WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active'`, [customer.id, customer.clientId]);
+  if (!result.rowCount) { res.status(404).json({ error: 'Account not found.' }); return; }
+  const row = result.rows[0];
+  res.json({ capabilities: {
+    enabledModules: row.enabled_modules ?? ['invest'],
+    customerType: row.customer_type ?? 'investor',
+    hasBorrowerAccount: Boolean(row.has_borrower_account),
+    hasOpenLoan: Boolean(row.has_open_loan),
+  }});
+}));
+
+mobilePortalRouter.post('/account-capabilities', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const customerType = text(req.body?.customerType);
+  if (!['investor','borrower','both'].includes(customerType)) {
+    res.status(400).json({ error: 'Choose a valid account type.' }); return;
+  }
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const result = await db.query(`SELECT c.customer_type,cl.enabled_modules,
+      EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account,
+      EXISTS(SELECT 1 FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
+          WHERE b.client_id=c.client_id AND b.customer_id=c.id AND l.status IN ('pending_approval','approved','active','overdue')) AS has_open_loan
+      FROM customers c JOIN clients cl ON cl.id=c.client_id
+      WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active' FOR UPDATE OF c`, [customer.id, customer.clientId]);
+    if (!result.rowCount) { await db.query('ROLLBACK'); res.status(404).json({ error: 'Account not found.' }); return; }
+    const row = result.rows[0];
+    const modules: string[] = row.enabled_modules ?? ['invest'];
+    const wantsInvest = customerType === 'investor' || customerType === 'both';
+    const wantsBorrow = customerType === 'borrower' || customerType === 'both';
+    if ((wantsInvest && !modules.includes('invest')) || (wantsBorrow && !modules.includes('borrow'))) {
+      await db.query('ROLLBACK'); res.status(403).json({ error: 'That account type is not available for this client.' }); return;
+    }
+    const currentlyHasBorrow = ['borrower','both'].includes(row.customer_type) || Boolean(row.has_borrower_account);
+    if (currentlyHasBorrow && !wantsBorrow && row.has_open_loan) {
+      await db.query('ROLLBACK'); res.status(409).json({ error: 'Borrowing cannot be disabled while you have a pending or active loan.' }); return;
+    }
+    await db.query('UPDATE customers SET customer_type=$3 WHERE id=$1 AND client_id=$2', [customer.id, customer.clientId, customerType]);
+    if (wantsBorrow) {
+      await db.query(`INSERT INTO borrowers (client_id,customer_id,status) VALUES ($1,$2,'active')
+        ON CONFLICT (client_id,customer_id) DO UPDATE SET status='active',updated_at=NOW()`, [customer.clientId, customer.id]);
+    } else {
+      await db.query(`UPDATE borrowers SET status='inactive',updated_at=NOW() WHERE client_id=$1 AND customer_id=$2 AND status='active'`, [customer.clientId, customer.id]);
+    }
+    await db.query('COMMIT');
+    res.json({ customerType, enabledModules: modules, hasBorrowerAccount: wantsBorrow, hasOpenLoan: Boolean(row.has_open_loan) });
+  } catch (error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+}));
+
+mobilePortalRouter.get('/borrowing/access', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const result = await pool.query(`SELECT
+      cl.status='active' AND 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) AS module_enabled,
+      c.status='active' AND (c.customer_type IN ('borrower','both') OR EXISTS (
+        SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active'
+      )) AS customer_enabled
+    FROM customers c JOIN clients cl ON cl.id=c.client_id WHERE c.id=$1 AND c.client_id=$2`, [customer.id, customer.clientId]);
+  const row = result.rows[0];
+  res.json({ enabled: Boolean(row?.module_enabled && row?.customer_enabled) });
+}));
+
+// Borrowing quotes and schedules are calculated in the mobile client. These
+// endpoints only return tenant policy and persist the submitted application.
+mobilePortalRouter.get('/borrowing/products', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const enabled = await pool.query(`SELECT 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) AS enabled,
+      c.customer_type
+    FROM clients cl JOIN customers c ON c.client_id=cl.id
+    WHERE cl.id=$1 AND c.id=$2 AND cl.status='active' AND c.status='active'`, [customer.clientId, customer.id]);
+  if (!enabled.rows[0]?.enabled) { res.status(403).json({ error: 'Borrowing is not enabled for this client.' }); return; }
+  const borrower = await pool.query(`SELECT 1 FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`, [customer.clientId, customer.id]);
+  if (!['borrower', 'both'].includes(enabled.rows[0]?.customer_type) && !borrower.rowCount) { res.status(403).json({ error: 'Borrowing is not enabled for your account. Contact your client for help.' }); return; }
+  const products = await pool.query(`SELECT id,name,interest_model,interest_rate_percent,interest_rate_period,
+      interest_frequency,repayment_model,repayment_frequency,payment_allocation,grace_period_days,
+      overdue_rule,overdue_charge,part_payments_allowed,advance_payment_treatment,approval_workflow,
+      rounding_scale,required_documents
+    FROM loan_products WHERE client_id=$1 AND status='active' ORDER BY created_at`, [customer.clientId]);
+  res.json({ products: products.rows });
+}));
+
+mobilePortalRouter.post('/borrowing/requests', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const productId = text(req.body?.productId);
+  const principal = Number(req.body?.principalAmount);
+  const termMonths = Number(req.body?.termMonths);
+  const purpose = text(req.body?.purpose);
+  const notes = text(req.body?.notes).slice(0, 500);
+  const schedule = req.body?.schedule;
+  const documents = Array.isArray(req.body?.documents) ? req.body.documents : [];
+  if (!isUuid(productId) || !Number.isFinite(principal) || principal <= 0 || principal > 1000000000 ||
+      !Number.isInteger(termMonths) || termMonths < 1 || termMonths > 600 || !purpose ||
+      !Array.isArray(schedule) || schedule.length < 1 || schedule.length > 600 ||
+      schedule.some((item: any) => !/^\d{4}-\d{2}-\d{2}$/.test(String(item?.dueDate ?? '')) ||
+        !Number.isFinite(Number(item?.principalDue)) || Number(item.principalDue) < 0 ||
+        !Number.isFinite(Number(item?.interestDue)) || Number(item.interestDue) < 0) || documents.length > 5 ||
+      documents.some((file: any) => typeof file?.base64 !== 'string' ||
+        !['image/jpeg', 'image/png'].includes(String(file?.mimeType)) ||
+        Buffer.byteLength(file.base64, 'base64') > 1_500_000)) {
+    res.status(400).json({ error: 'Review the loan amount, term, and repayment schedule.' }); return;
+  }
+  const scheduledPrincipal = schedule.reduce((sum: number, item: any) => sum + Number(item.principalDue), 0);
+  if (Math.abs(scheduledPrincipal - principal) > 0.01) {
+    res.status(400).json({ error: 'The repayment plan does not balance to the requested amount. Please review your estimate.' }); return;
+  }
+
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const account = await db.query(`SELECT customer_type FROM customers WHERE id=$1 AND client_id=$2 AND status='active' FOR UPDATE`, [customer.id, customer.clientId]);
+    const existingBorrower = await db.query(`SELECT 1 FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`, [customer.clientId, customer.id]);
+    if (!['borrower', 'both'].includes(account.rows[0]?.customer_type) && !existingBorrower.rowCount) { await db.query('ROLLBACK'); res.status(403).json({ error: 'Borrowing is not enabled for your account. Contact your client for help.' }); return; }
+    const productResult = await db.query(`SELECT lp.* FROM loan_products lp JOIN clients cl ON cl.id=lp.client_id
+      WHERE lp.id=$1 AND lp.client_id=$2 AND lp.status='active' AND cl.status='active'
+        AND 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) FOR UPDATE OF lp`, [productId, customer.clientId]);
+    const product = productResult.rows[0];
+    if (!product) { await db.query('ROLLBACK'); res.status(404).json({ error: 'This loan product is no longer available.' }); return; }
+    const borrowerResult = await db.query(`INSERT INTO borrowers (client_id,customer_id,status)
+      VALUES ($1,$2,'active') ON CONFLICT (client_id,customer_id) DO UPDATE SET status='active',updated_at=NOW() RETURNING id`, [customer.clientId, customer.id]);
+    const borrowerId = borrowerResult.rows[0].id;
+    await db.query(`UPDATE customers SET customer_type=CASE WHEN customer_type='investor' THEN 'both' ELSE customer_type END WHERE id=$1 AND client_id=$2`, [customer.id, customer.clientId]);
+    const serial = await db.query(`SELECT nextval('loan_number_seq') AS n`);
+    const loanNumber = `LN-${String(serial.rows[0].n).padStart(8, '0')}`;
+    const status = product.approval_workflow === 'direct_activation' ? 'approved' : 'pending_approval';
+    const startDate = toDateOnly(new Date());
+    const maturityDate = schedule[schedule.length - 1].dueDate;
+    const terms = { ...product, installments: schedule.length, term_months: termMonths, purpose, borrower_notes: notes, repayment_schedule: schedule };
+    const loan = await db.query(`INSERT INTO loans (client_id,borrower_id,product_id,loan_number,status,principal_amount,interest_rate_percent,terms_snapshot,start_date,maturity_date)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10) RETURNING id`, [customer.clientId, borrowerId, productId, loanNumber, status, principal, product.interest_rate_percent, JSON.stringify(terms), startDate, maturityDate]);
+    const loanId = loan.rows[0].id;
+    for (const file of documents) {
+      const bytes = Buffer.from(file.base64, 'base64');
+      if (!bytes.length || bytes.length > 1_500_000) continue;
+      const name = text(file.name).replace(/[\\/]/g, '').slice(0, 180) || 'supporting-document.jpg';
+      await db.query(`INSERT INTO loan_documents (client_id,borrower_id,loan_id,document_type,storage_path,original_name,document_data,mime_type,size_bytes)
+        VALUES ($1,$2,$3,'supporting_document','database',$4,$5,$6,$7)`, [customer.clientId, borrowerId, loanId, name, bytes, file.mimeType, bytes.length]);
+    }
+    for (let index = 0; index < schedule.length; index++) {
+      const item = schedule[index];
+      const saved = await db.query(`INSERT INTO loan_schedules (client_id,loan_id,installment_number,due_date,principal_due,interest_due)
+        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [customer.clientId, loanId, index + 1, item.dueDate, Number(item.principalDue).toFixed(2), Number(item.interestDue).toFixed(2)]);
+      await db.query(`INSERT INTO collection_tasks (client_id,borrower_id,loan_id,schedule_id,due_date) VALUES ($1,$2,$3,$4,$5)`, [customer.clientId, borrowerId, loanId, saved.rows[0].id, item.dueDate]);
+    }
+    await db.query(`INSERT INTO loan_audit_logs (client_id,entity_type,entity_id,action,changes)
+      VALUES ($1,'loan',$2,'customer_requested',$3::jsonb)`, [customer.clientId, loanId, JSON.stringify({ customerId: customer.id, status, principalAmount: principal, productId })]);
+    await db.query('COMMIT');
+    res.status(201).json({ loanId, loanNumber, status });
+  } catch (error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+}));
+
+mobilePortalRouter.get('/borrowing/loans', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const access = await pool.query(`SELECT c.customer_type, 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) AS enabled
+    FROM customers c JOIN clients cl ON cl.id=c.client_id WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active'`, [customer.id, customer.clientId]);
+  const borrower = await pool.query(`SELECT 1 FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`, [customer.clientId, customer.id]);
+  if (!access.rows[0]?.enabled || (!['borrower', 'both'].includes(access.rows[0]?.customer_type) && !borrower.rowCount)) { res.status(403).json({ error: 'Borrowing is not enabled for your account.' }); return; }
+  const loans = await pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,
+      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.created_at,
+      lp.name AS product_name,lp.interest_model,lp.interest_rate_period,lp.repayment_model,
+      lp.repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
+    FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
+    JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
+    WHERE l.client_id=$1 AND b.customer_id=$2 ORDER BY l.created_at DESC LIMIT 250`, [customer.clientId, customer.id]);
+  const ids = loans.rows.map((loan) => loan.id);
+  if (!ids.length) { res.json({ loans: [], schedules: [], ledger: [], payments: [] }); return; }
+  const [schedules, ledger, payments] = await Promise.all([
+    pool.query(`SELECT loan_id,id,installment_number,due_date,principal_due,interest_due,overdue_charge,amount_paid,status
+      FROM loan_schedules WHERE client_id=$1 AND loan_id=ANY($2::uuid[]) ORDER BY due_date,installment_number`, [customer.clientId, ids]),
+    pool.query(`SELECT loan_id,id,event_type,principal_debit,principal_credit,interest_debit,interest_credit,overdue_debit,overdue_credit,event_date,description,created_at
+      FROM loan_ledger WHERE client_id=$1 AND loan_id=ANY($2::uuid[]) ORDER BY event_date,created_at`, [customer.clientId, ids]),
+    pool.query(`SELECT loan_id,id,received_on,amount_received,principal_component,interest_component,overdue_component,unapplied_amount,reference_number,status,created_at
+      FROM loan_payments WHERE client_id=$1 AND customer_id=$2 AND loan_id=ANY($3::uuid[]) ORDER BY received_on DESC,created_at DESC`, [customer.clientId, customer.id, ids]),
+  ]);
+  await pool.query(`INSERT INTO customer_notifications (client_id,customer_id,kind,title,body,decision,reference_id)
+    SELECT s.client_id,$2,'loan',
+      CASE WHEN s.due_date+lp.grace_period_days < public.admin_ist_today() THEN 'Loan payment overdue' ELSE 'Loan payment due' END,
+      CASE WHEN s.due_date+lp.grace_period_days < public.admin_ist_today()
+        THEN 'A scheduled payment for loan '||l.loan_number||' is overdue. Please contact your client to arrange payment.'
+        ELSE 'A payment for loan '||l.loan_number||' is due today.' END,
+      CASE WHEN s.due_date+lp.grace_period_days < public.admin_ist_today() THEN 'overdue' ELSE 'due' END,s.id
+    FROM loan_schedules s JOIN loans l ON l.id=s.loan_id AND l.client_id=s.client_id
+    JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
+    JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
+    WHERE s.client_id=$1 AND b.customer_id=$2 AND s.loan_id=ANY($3::uuid[])
+      AND l.status IN ('active','overdue') AND s.status IN ('scheduled','partial','overdue')
+      AND s.due_date<=public.admin_ist_today()
+    ON CONFLICT (customer_id,reference_id,kind,decision) WHERE kind='loan' AND reference_id IS NOT NULL DO NOTHING`, [customer.clientId, customer.id, ids]);
+  res.json({ loans: loans.rows, schedules: schedules.rows, ledger: ledger.rows, payments: payments.rows });
+}));
+
+mobilePortalRouter.get('/borrowing/loans/:loanId', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const loanId = text(req.params.loanId);
+  if (!isUuid(loanId)) { res.status(404).json({ error: 'Loan not found.' }); return; }
+  const loan = await pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,
+      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,
+      lp.name AS product_name,lp.interest_model,lp.interest_rate_period,lp.repayment_model,
+      lp.repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
+    FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
+    JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
+    WHERE l.id=$1 AND l.client_id=$2 AND b.customer_id=$3`, [loanId, customer.clientId, customer.id]);
+  if (!loan.rowCount) { res.status(404).json({ error: 'Loan not found.' }); return; }
+  const [schedules, ledger, payments, documents] = await Promise.all([
+    pool.query(`SELECT id,installment_number,due_date,principal_due,interest_due,overdue_charge,amount_paid,status
+      FROM loan_schedules WHERE loan_id=$1 AND client_id=$2 ORDER BY due_date,installment_number`, [loanId, customer.clientId]),
+    pool.query(`SELECT id,event_type,principal_debit,principal_credit,interest_debit,interest_credit,overdue_debit,overdue_credit,event_date,description,reference_type,reference_id,created_at
+      FROM loan_ledger WHERE loan_id=$1 AND client_id=$2 ORDER BY event_date DESC,created_at DESC`, [loanId, customer.clientId]),
+    pool.query(`SELECT id,received_on,amount_received,principal_component,interest_component,overdue_component,unapplied_amount,reference_number,status,created_at
+      FROM loan_payments WHERE loan_id=$1 AND client_id=$2 AND customer_id=$3 ORDER BY received_on DESC,created_at DESC`, [loanId, customer.clientId, customer.id]),
+    pool.query(`SELECT id,document_type,original_name,mime_type,size_bytes,created_at
+      FROM loan_documents WHERE loan_id=$1 AND borrower_id IN (SELECT id FROM borrowers WHERE customer_id=$2 AND client_id=$3) AND client_id=$3 ORDER BY created_at DESC`, [loanId, customer.id, customer.clientId]),
+  ]);
+  res.json({ loan: loan.rows[0], schedules: schedules.rows, ledger: ledger.rows, payments: payments.rows, documents: documents.rows });
+}));
+
+mobilePortalRouter.get('/borrowing/documents/:documentId', asyncHandler(async (req, res) => {
+  const customer = (req as CustomerRequest).customer;
+  const id = text(req.params.documentId);
+  if (!isUuid(id)) { res.status(404).json({ error: 'Document not found.' }); return; }
+  const result = await pool.query(`SELECT d.original_name,d.mime_type,encode(d.document_data,'base64') AS base64
+    FROM loan_documents d JOIN borrowers b ON b.id=d.borrower_id AND b.client_id=d.client_id
+    WHERE d.id=$1 AND d.client_id=$2 AND b.customer_id=$3`, [id, customer.clientId, customer.id]);
+  if (!result.rowCount || !result.rows[0].base64) { res.status(404).json({ error: 'Document not found.' }); return; }
+  res.json({ document: result.rows[0] });
+}));
+
 function maskAccount(accountNumber: unknown) {
   const digits = String(accountNumber ?? '').replace(/\D/g, '');
   const last4 = digits.slice(-4) || '****';
@@ -1232,10 +1465,10 @@ function mapNotification(row: Record<string, unknown>) {
       ? 'withdrawal'
       : row.kind === 'agreement_renewal'
         ? 'agreement_renewal'
-        : 'investment',
+        : row.kind === 'loan' ? 'loan' : 'investment',
     title: row.title,
     body: row.body,
-    decision: row.decision === 'rejected' ? 'rejected' : 'approved',
+    decision: row.decision,
     referenceId: row.reference_id ?? null,
     isRead: Boolean(row.is_read),
     createdAt: row.created_at,

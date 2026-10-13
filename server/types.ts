@@ -25,6 +25,9 @@ export type CustomerAuth = {
   clientName: string;
   clientCode: string;
   mobileVerified: boolean;
+  enabledModules?: string[];
+  customerType?: string;
+  hasBorrowerAccount?: boolean;
 };
 
 export type UserRow = {

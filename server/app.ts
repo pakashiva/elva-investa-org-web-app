@@ -7,9 +7,10 @@ import { clientsRouter } from './routes/clients';
 import { dashboardRouter } from './routes/dashboard';
 import { mobileAuthRouter } from './routes/mobileAuth';
 import { mobilePortalRouter } from './routes/mobilePortal';
+import { borrowingRouter } from './routes/borrowing';
 
 export const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
 app.use(cookieParser());
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -37,6 +38,7 @@ app.use('/api/mobile', mobilePortalRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/client-portal', clientPortalRouter);
+app.use('/api/borrowing', borrowingRouter);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found.' });
