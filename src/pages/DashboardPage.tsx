@@ -38,7 +38,7 @@ export function DashboardPage() {
     <>
       <AppHeader
         title="Platform Dashboard"
-        subtitle="ELVA Investa clients, customers, and invested capital across all tenants."
+        subtitle="ELVA CAPITA clients, customers, and invested capital across all tenants."
         onOpenMenu={onOpenMenu}
         actions={
           <Link className="primary-btn" to="/clients/new">

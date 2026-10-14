@@ -267,11 +267,11 @@ export function RegisterClientPage() {
     <div className="auth-screen register-screen">
       <form className="auth-card register-card" onSubmit={(event) => void onSubmit(event)}>
         <header className="register-head">
-          <img src="/logo-mark.png" alt="ELVA Investa" width={56} height={56} />
+          <img src="/logo-mark.png" alt="ELVA CAPITA" width={56} height={56} />
           <div>
             <h1>Register as client</h1>
             <p>
-              Board a new trader on ELVA Investa, the same way Venkatesh Traders and Loreal Trades
+              Board a new trader on ELVA CAPITA, the same way Venkatesh Traders and Loreal Trades
               operate. You get one Client Admin login and a client code for customers.
             </p>
           </div>
@@ -492,7 +492,7 @@ export function RegisterClientPage() {
             onChange={(event) => update('authorized', event.target.checked)}
           />
           <span>
-            I am authorised to board this trader on ELVA Investa and will operate as Client Admin.
+            I am authorised to board this trader on ELVA CAPITA and will operate as Client Admin.
             {errors.authorized ? <em className="register-consent-error">{errors.authorized}</em> : null}
           </span>
         </label>

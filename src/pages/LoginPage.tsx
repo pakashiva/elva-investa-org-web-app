@@ -30,8 +30,8 @@ export function LoginPage() {
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={(event) => void onSubmit(event)}>
-        <img src="/logo-mark.png" alt="ELVA Investa" width={96} height={96} />
-        <h1>ELVA Investa</h1>
+        <img src="/logo-mark.png" alt="ELVA CAPITA" width={96} height={96} />
+        <h1>ELVA CAPITA</h1>
         <p>Sign in with your admin username and password.</p>
         {error ? <div className="error-box">{error}</div> : null}
         <label>

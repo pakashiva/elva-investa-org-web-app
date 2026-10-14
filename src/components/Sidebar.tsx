@@ -47,7 +47,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div className="sidebar-brand">
           <img src="/logo-mark.png" alt="" />
           <div className="sidebar-brand-text">
-            <strong>ELVA Investa</strong>
+            <strong>ELVA CAPITA</strong>
             <span>{isSuperAdmin ? 'SUPER ADMIN' : clientLabel}</span>
           </div>
         </div>

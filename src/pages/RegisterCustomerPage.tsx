@@ -337,7 +337,7 @@ export function RegisterCustomerPage() {
             </div>
           </dl>
           <p>
-            Sign in to the ELVA Investa mobile app with this mobile number or email and the
+            Sign in to the ELVA CAPITA mobile app with this mobile number or email and the
             password you just set.
           </p>
           <Link className="primary-btn" to="/login">
@@ -356,7 +356,7 @@ export function RegisterCustomerPage() {
           <div>
             <h1>Register as customer</h1>
             <p>
-              Complete this form to join a trader on ELVA Investa. Use the client code they gave
+              Complete this form to join a trader on ELVA CAPITA. Use the client code they gave
               you, such as VTINVEST.
             </p>
           </div>
@@ -721,7 +721,7 @@ export function RegisterCustomerPage() {
               checked={form.authorized}
               onChange={(event) => update('authorized', event.target.checked)}
             />
-            <span>I confirm these details are mine and I want to join this trader on ELVA Investa.</span>
+            <span>I confirm these details are mine and I want to join this trader on ELVA CAPITA.</span>
           </label>
           {errors.authorized ? <em className="register-consent-error">{errors.authorized}</em> : null}
         </section>
