@@ -178,7 +178,7 @@ export function AddWithdrawalModal({ open, onClose, onCreated }: Props) {
             <h3>Customer & Fund</h3>
             <div className="create-grid">
               <label className="create-field">
-                <span>Customer Name</span>
+                <span>Customer Name <b className="required-indicator" aria-hidden="true">*</b></span>
                 <div className="customer-combobox" ref={wrapRef}>
                   <div className="customer-combobox-input">
                     <Search size={16} />
@@ -224,7 +224,7 @@ export function AddWithdrawalModal({ open, onClose, onCreated }: Props) {
               </label>
 
               <label className="create-field">
-                <span>Active investment</span>
+                <span>Fund Title <b className="required-indicator" aria-hidden="true">*</b></span>
                 <select
                   value={form.investmentId}
                   disabled={!form.userId}
@@ -267,7 +267,7 @@ export function AddWithdrawalModal({ open, onClose, onCreated }: Props) {
               </label>
 
               <label className="create-field">
-                <span>Amount (₹)</span>
+                <span>Amount (₹) <b className="required-indicator" aria-hidden="true">*</b></span>
                 <input
                   inputMode="decimal"
                   value={form.amount}
@@ -287,7 +287,7 @@ export function AddWithdrawalModal({ open, onClose, onCreated }: Props) {
           <section className="create-section">
             <h3>Payout bank</h3>
             <label className="create-field">
-              <span>Account Number</span>
+                <span>Account Number <b className="required-indicator" aria-hidden="true">*</b></span>
               <select
                 value={form.bankAccountId}
                 disabled={!form.userId}

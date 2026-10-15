@@ -2611,6 +2611,11 @@ a {
   color: var(--text-secondary);
 }
 
+.create-field .required-indicator {
+  color: #c62828;
+  font-weight: 700;
+}
+
 .create-field input,
 .create-field select,
 .create-field textarea {
