@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from 'react';
-import { ArrowDownLeft, Calendar, Plus, Search, UserPlus } from 'lucide-react';
+import { ArrowDownLeft, Calendar, HandCoins, Plus, Search, UserPlus } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { ErrorBanner } from '../components/States';
@@ -21,6 +21,7 @@ const FILTERS: { id: NotificationFilter; label: string }[] = [
   { id: 'investment', label: 'Investments' },
   { id: 'withdrawal', label: 'Withdrawals' },
   { id: 'customer', label: 'New Customers' },
+  { id: 'loan', label: 'Borrowing' },
 ];
 
 export function NotificationsPage() {
@@ -162,6 +163,8 @@ export function NotificationsPage() {
                       <Plus size={16} />
                     ) : row.kind === 'withdrawal' ? (
                       <ArrowDownLeft size={16} />
+                    ) : row.kind === 'loan' ? (
+                      <HandCoins size={16} />
                     ) : (
                       <UserPlus size={16} />
                     )}

@@ -87,6 +87,37 @@ notificationsRouter.get(
          FROM customers c
          WHERE c.client_id = $1
            AND c.created_at >= (NOW() - INTERVAL '7 days')
+
+         UNION ALL
+
+         SELECT
+           'loan:' || l.id::text,
+           'loan',
+           c.full_name,
+           l.principal_amount,
+           l.loan_number,
+           l.created_at,
+           '/borrowing/loans'
+         FROM loans l
+         JOIN borrowers b ON b.id = l.borrower_id AND b.client_id = l.client_id
+         JOIN customers c ON c.id = b.customer_id AND c.client_id = b.client_id
+         WHERE l.client_id = $1 AND l.status = 'pending_approval'
+
+         UNION ALL
+
+         SELECT
+           'loan-offer-response:' || l.id::text,
+           'loan',
+           c.full_name,
+           l.principal_amount,
+           CASE WHEN l.status='cancelled' THEN 'Custom offer declined' ELSE 'Custom offer accepted' END,
+           l.updated_at,
+           '/borrowing/loans'
+         FROM loans l
+         JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
+         JOIN customers c ON c.id=b.customer_id AND c.client_id=b.client_id
+         WHERE l.client_id=$1 AND l.request_type='custom' AND l.counter_offer_count=1
+           AND l.status IN ('approved','active','overdue','closed','written_off','cancelled')
        ) n
        LEFT JOIN admin_notification_reads r
          ON r.notice_key = n.notice_key AND r.user_id = $2
@@ -100,7 +131,7 @@ notificationsRouter.get(
       if (to && occurred > to) return false;
       if (kind !== 'all' && row.kind !== kind) return false;
       if (filter === 'unread' && !row.unread) return false;
-      if ((filter === 'investment' || filter === 'withdrawal' || filter === 'customer') && row.kind !== filter) {
+      if ((filter === 'investment' || filter === 'withdrawal' || filter === 'customer' || filter === 'loan') && row.kind !== filter) {
         return false;
       }
       if (search) {
@@ -148,6 +179,15 @@ notificationsRouter.get(
          SELECT 'customer:' || c.id::text
          FROM customers c
          WHERE c.client_id = $1 AND c.created_at >= (NOW() - INTERVAL '7 days')
+         UNION ALL
+         SELECT 'loan:' || l.id::text
+         FROM loans l
+         WHERE l.client_id = $1 AND l.status = 'pending_approval'
+         UNION ALL
+         SELECT 'loan-offer-response:' || l.id::text
+         FROM loans l
+         WHERE l.client_id=$1 AND l.request_type='custom' AND l.counter_offer_count=1
+           AND l.status IN ('approved','active','overdue','closed','written_off','cancelled')
        ) n
        LEFT JOIN admin_notification_reads r
          ON r.notice_key = n.notice_key AND r.user_id = $2
@@ -208,6 +248,15 @@ notificationsRouter.post(
          SELECT 'customer:' || c.id::text
          FROM customers c
          WHERE c.client_id = $1 AND c.created_at >= (NOW() - INTERVAL '7 days')
+         UNION ALL
+         SELECT 'loan:' || l.id::text
+         FROM loans l
+         WHERE l.client_id = $1 AND l.status = 'pending_approval'
+         UNION ALL
+         SELECT 'loan-offer-response:' || l.id::text
+         FROM loans l
+         WHERE l.client_id=$1 AND l.request_type='custom' AND l.counter_offer_count=1
+           AND l.status IN ('approved','active','overdue','closed','written_off','cancelled')
        ) n
        ON CONFLICT (user_id, notice_key) DO NOTHING`,
       [auth.clientId, auth.id]

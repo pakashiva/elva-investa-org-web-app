@@ -260,6 +260,33 @@ a {
   margin-left: auto;
 }
 
+.module-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f5f6f8;
+  white-space: nowrap;
+}
+
+.module-switch button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 13px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.module-switch button.active {
+  background: #fff;
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px #1720331c;
+}
+
 .search-pill {
   width: min(360px, 32vw);
   height: 42px;
@@ -1435,7 +1462,7 @@ a {
 .borrowing-page .table-scroll > table td small { display:block; margin-top:3px; color:var(--text-secondary); font-size:12px; }
 .borrowing-page .row-actions { min-width:170px; white-space:normal; }
 .borrowing-page .borrowing-loans-table th:last-child { text-align:center; }
-.borrowing-page .borrowing-loans-table td.row-actions { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:6px; }
+.borrowing-page .borrowing-loans-table td.row-actions { display:table-cell; min-width:190px; text-align:center; white-space:normal; }
 .borrowing-page .row-actions button,
 .borrowing-page .table-scroll button { margin:2px 4px 2px 0; padding:7px 10px; border:1px solid var(--border); border-radius:7px; background:#fff; color:var(--navy); font-size:12px; font-weight:600; cursor:pointer; }
 .borrowing-page .table-scroll button:hover,
@@ -1443,6 +1470,13 @@ a {
 .borrowing-page .table-scroll button:disabled,
 .borrowing-page .row-actions button:disabled { opacity:.5; cursor:not-allowed; }
 .borrowing-page .borrowing-rules-table { min-width:980px; }
+.borrowing-form-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; }
+.borrowing-form-actions button { min-height:40px; padding:9px 16px; }
+.borrowing-approval-card .set-loan-defaults-btn { padding:9px 14px; border:1px solid #1d4ed8; border-radius:8px; background:#2563eb; color:#fff; font-size:13px; font-weight:700; cursor:pointer; }
+.borrowing-approval-card .set-loan-defaults-btn:hover { border-color:#1e40af; background:#1d4ed8; }
+.borrowing-approval-card .set-loan-defaults-btn:focus-visible { outline:3px solid rgba(37,99,235,.28); outline-offset:2px; }
+.borrowing-approval-card .create-field { align-content:start; }
+.borrowing-approval-card .create-field small.form-hint { margin:0; line-height:1.45; }
 @media (max-width:640px) { .borrowing-detail { padding:14px; } .borrowing-detail-heading { flex-direction:column; } }
 
 .customer-modal-nav {

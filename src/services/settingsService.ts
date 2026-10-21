@@ -17,6 +17,7 @@ export type ClientSettingsView = {
   referralTdsRate: number;
   updatedAt: string | null;
   agreementParty: AgreementPartyForm;
+  loanDefaults: Record<string, unknown> | null;
 };
 
 function mapSettings(raw: Record<string, unknown>): ClientSettingsView {
@@ -36,6 +37,7 @@ function mapSettings(raw: Record<string, unknown>): ClientSettingsView {
     referralTdsRate: Number(raw.referralTdsRate ?? 0),
     updatedAt: raw.updatedAt ? String(raw.updatedAt) : null,
     agreementParty: asAgreementPartyForm(raw.agreementParty),
+    loanDefaults: raw.loanDefaults && typeof raw.loanDefaults === 'object' ? raw.loanDefaults as Record<string, unknown> : null,
   };
 }
 
@@ -57,5 +59,10 @@ export async function saveClientAgreementParty(agreementParty: AgreementPartyFor
     method: 'PATCH',
     body: JSON.stringify({ agreementParty }),
   });
+  return mapSettings(data.settings ?? {});
+}
+
+export async function saveLoanDefaults(loanDefaults: Record<string, unknown>) {
+  const data = await api<{ settings: Record<string, unknown> }>('/api/client-portal/settings', { method: 'PATCH', body: JSON.stringify({ loanDefaults }) });
   return mapSettings(data.settings ?? {});
 }

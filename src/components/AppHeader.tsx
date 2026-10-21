@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Bell } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnreadCount } from '../hooks/useUnreadCount';
 import { adminRoleLabel, firstName } from '../utils/format';
@@ -22,7 +22,12 @@ export function AppHeader({
   onOpenMenu,
 }: AppHeaderProps) {
   const { admin } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const isClientAdmin = admin?.role === 'client_admin';
+  const borrowingEnabled = admin?.enabledModules?.includes('borrow') ?? false;
+  const investingEnabled = admin?.enabledModules?.includes('invest') ?? true;
+  const borrowingActive = location.pathname.startsWith('/borrowing');
   const unreadCount = useUnreadCount();
   const displayName = admin?.fullName || admin?.full_name || 'Admin';
 
@@ -37,6 +42,16 @@ export function AppHeader({
       </div>
 
       <div className="header-tools">
+        {isClientAdmin && borrowingEnabled && investingEnabled ? (
+          <div className="module-switch" role="group" aria-label="Choose workspace module">
+            <button type="button" className={!borrowingActive ? 'active' : ''} aria-pressed={!borrowingActive} onClick={() => navigate('/')}>
+              Investment
+            </button>
+            <button type="button" className={borrowingActive ? 'active' : ''} aria-pressed={borrowingActive} onClick={() => navigate('/borrowing')}>
+              Borrowing
+            </button>
+          </div>
+        ) : null}
         {isClientAdmin && showSearch ? (
           <form className="search-pill" onSubmit={(event) => event.preventDefault()}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -49,7 +64,7 @@ export function AppHeader({
         {actions}
         {isClientAdmin ? (
           <Link
-            to="/notifications"
+            to={borrowingActive ? '/borrowing/notifications' : '/notifications'}
             className="icon-btn notify-btn"
             aria-label={
               unreadCount > 0

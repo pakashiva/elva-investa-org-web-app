@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { listNotifications } from '../services/notificationService';
 import type { AdminNotification, NotificationFilter, NotificationKind } from '../types/admin';
 
+const POLL_MS = 3_000;
+
 export function useNotifications() {
   const [filter, setFilter] = useState<NotificationFilter>('all');
   const [kind, setKind] = useState<'all' | NotificationKind>('all');
@@ -19,23 +21,32 @@ export function useNotifications() {
     return () => window.clearTimeout(handle);
   }, [searchInput]);
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const result = await listNotifications({ filter, kind, search, from, to });
       setRows(result.rows);
       setUnreadCount(result.unreadCount);
     } catch (err) {
-      setRows([]);
-      setError(err instanceof Error ? err.message : 'Failed to load notifications');
+      if (!silent) {
+        setRows([]);
+        setError(err instanceof Error ? err.message : 'Failed to load notifications');
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [filter, kind, search, from, to]);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => void load(true), POLL_MS);
+    return () => window.clearInterval(interval);
   }, [load]);
 
   return {
@@ -55,7 +66,7 @@ export function useNotifications() {
     error,
     changeFilter: (next: NotificationFilter) => {
       setFilter(next);
-      if (next === 'investment' || next === 'withdrawal' || next === 'customer') {
+      if (next === 'investment' || next === 'withdrawal' || next === 'customer' || next === 'loan') {
         setKind(next);
       }
       if (next === 'all') {

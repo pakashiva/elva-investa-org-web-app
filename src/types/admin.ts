@@ -528,7 +528,7 @@ export type GeneratedReportRow = {
   created_at: string;
 };
 
-export type NotificationKind = 'investment' | 'withdrawal' | 'customer';
+export type NotificationKind = 'investment' | 'withdrawal' | 'customer' | 'loan';
 
 export type NotificationFilter = 'all' | 'unread' | NotificationKind;
 

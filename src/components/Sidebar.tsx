@@ -1,4 +1,4 @@
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import {
   Bell,
   Building2,
@@ -37,7 +37,9 @@ type SidebarProps = {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { admin, signOut } = useAuth();
+  const location = useLocation();
   const isSuperAdmin = admin?.role === 'super_admin';
+  const borrowingActive = location.pathname.startsWith('/borrowing');
   const clientLabel = admin?.clientName || 'Client Admin';
 
   return (
@@ -82,7 +84,18 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </NavLink>
             </>
           ) : (
-            [...CLIENT_NAV.filter((item) => admin?.enabledModules?.includes('invest') !== false || !['/investment-requests', '/withdrawals', '/tds', '/referrals'].includes(item.to)), ...(admin?.enabledModules?.includes('borrow') ? [{ to: '/borrowing', label: 'Borrowing', end: false, icon: HandCoins }] : [])].map((item) => {
+            (borrowingActive
+              ? [
+                  { to: '/borrowing', label: 'Dashboard', end: true, icon: LayoutDashboard },
+                  { to: '/borrowing/customers', label: 'Customers', end: false, icon: Users },
+                  { to: '/borrowing/loans', label: 'Borrowing', end: false, icon: HandCoins },
+                  { to: '/borrowing/reports', label: 'Reports', end: false, icon: FileBarChart },
+                  { to: '/borrowing/notifications', label: 'Notifications', end: false, icon: Bell },
+                  { to: '/borrowing/settings', label: 'Settings', end: false, icon: Settings },
+                  { to: '/borrowing/manage-passwords', label: 'Manage Passwords', end: false, icon: KeyRound },
+                ]
+              : CLIENT_NAV.filter((item) => admin?.enabledModules?.includes('invest') !== false || !['/investment-requests', '/withdrawals', '/tds', '/referrals'].includes(item.to))
+            ).map((item) => {
               const Icon = item.icon;
               return (
                 <NavLink

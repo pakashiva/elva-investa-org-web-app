@@ -20,6 +20,7 @@ import {
   getClientSettings,
   saveClientAgreementParty,
   saveClientSupport,
+  saveLoanDefaults,
   type ClientSettingsView,
 } from '../services/settingsService';
 import type { ChequeFieldPresets } from '../types/admin';
@@ -86,6 +87,9 @@ export function SettingsPage() {
       setIsSaving(false);
     }
   }
+
+  async function onSaveLoanDefaults(event: FormEvent) { event.preventDefault(); if(!settings?.loanDefaults)return; setIsSaving(true);setError(null);setNotice(null);try{const saved=await saveLoanDefaults(settings.loanDefaults);setSettings(saved);setNotice('Default loan terms saved.');}catch(err){setError(err instanceof Error?err.message:'Failed to save loan defaults');}finally{setIsSaving(false);} }
+  function updateLoanDefault(key:string,value:string|boolean){setSettings(current=>current?.loanDefaults?{...current,loanDefaults:{...current.loanDefaults,[key]:['interest_rate_percent','overdue_charge','grace_period_days','rounding_scale'].includes(key)?Number(value):value}}:current);}
 
   function updateParty<K extends keyof AgreementPartyForm>(key: K, value: AgreementPartyForm[K]) {
     setParty((current) => ({ ...current, [key]: value }));
@@ -267,6 +271,18 @@ export function SettingsPage() {
             {isSaving ? 'Saving…' : 'Save Contacts'}
           </button>
         </div>
+      </form>
+
+      <form className="card settings-card" onSubmit={(event)=>void onSaveLoanDefaults(event)}>
+        <h2>Default loan approval terms</h2><p className="form-hint">Saved during client registration. “Use defaults” on loan approval uses these values.</p>
+        {!settings?.loanDefaults?<p className="state-box">No active borrowing product is configured for this client.</p>:<>
+          <div className="settings-row"><label className="settings-field"><span>Interest rate (%)</span><input className="settings-input" type="number" min="0" max="100" step="0.01" value={String(settings.loanDefaults.interest_rate_percent??'')} onChange={e=>updateLoanDefault('interest_rate_percent',e.target.value)}/></label><label className="settings-field"><span>Interest type</span><select className="settings-input" value={String(settings.loanDefaults.interest_model)} onChange={e=>updateLoanDefault('interest_model',e.target.value)}><option value="simple">Simple</option><option value="flat">Flat</option><option value="reducing_balance">Reducing balance</option></select></label><label className="settings-field"><span>Rate period</span><select className="settings-input" value={String(settings.loanDefaults.interest_rate_period)} onChange={e=>updateLoanDefault('interest_rate_period',e.target.value)}>{['daily','weekly','monthly','annual'].map(x=><option key={x} value={x}>{x}</option>)}</select></label></div>
+          <div className="settings-row"><label className="settings-field"><span>Interest frequency</span><select className="settings-input" value={String(settings.loanDefaults.interest_frequency)} onChange={e=>updateLoanDefault('interest_frequency',e.target.value)}>{['daily','weekly','monthly','quarterly','at_maturity'].map(x=><option key={x} value={x}>{x.replaceAll('_',' ')}</option>)}</select></label><label className="settings-field"><span>Repayment model</span><select className="settings-input" value={String(settings.loanDefaults.repayment_model)} onChange={e=>updateLoanDefault('repayment_model',e.target.value)}>{['interest_only','principal_and_interest','bullet'].map(x=><option key={x} value={x}>{x.replaceAll('_',' ')}</option>)}</select></label><label className="settings-field"><span>Repayment frequency</span><select className="settings-input" value={String(settings.loanDefaults.repayment_frequency)} onChange={e=>updateLoanDefault('repayment_frequency',e.target.value)}>{['weekly','monthly','quarterly','at_maturity'].map(x=><option key={x} value={x}>{x.replaceAll('_',' ')}</option>)}</select></label></div>
+          <div className="settings-row"><label className="settings-field"><span>Payment allocation</span><select className="settings-input" value={String(settings.loanDefaults.payment_allocation)} onChange={e=>updateLoanDefault('payment_allocation',e.target.value)}><option value="interest_first">Interest first</option><option value="principal_first">Principal first</option></select></label><label className="settings-field"><span>Grace period (days)</span><input className="settings-input" type="number" min="0" step="1" value={String(settings.loanDefaults.grace_period_days)} onChange={e=>updateLoanDefault('grace_period_days',e.target.value)}/></label><label className="settings-field"><span>Overdue treatment</span><select className="settings-input" value={String(settings.loanDefaults.overdue_rule)} onChange={e=>updateLoanDefault('overdue_rule',e.target.value)}>{['status_only','percentage_charge','fixed_charge'].map(x=><option key={x} value={x}>{x.replaceAll('_',' ')}</option>)}</select></label><label className="settings-field"><span>Overdue charge</span><input className="settings-input" type="number" min="0" step="0.01" value={String(settings.loanDefaults.overdue_charge)} onChange={e=>updateLoanDefault('overdue_charge',e.target.value)}/></label></div>
+          <div className="settings-row"><label className="settings-field"><span>Advance payment treatment</span><select className="settings-input" value={String(settings.loanDefaults.advance_payment_treatment)} onChange={e=>updateLoanDefault('advance_payment_treatment',e.target.value)}>{['reduce_principal','cover_future_dues','credit_balance'].map(x=><option key={x} value={x}>{x.replaceAll('_',' ')}</option>)}</select></label><label className="settings-field"><span>Approval workflow</span><select className="settings-input" value={String(settings.loanDefaults.approval_workflow)} onChange={e=>updateLoanDefault('approval_workflow',e.target.value)}><option value="manual">Manual approval</option><option value="direct_activation">Direct activation</option></select></label><label className="settings-field"><span>Closure mode</span><select className="settings-input" value={String(settings.loanDefaults.closure_mode)} onChange={e=>updateLoanDefault('closure_mode',e.target.value)}><option value="automatic">Automatic</option><option value="manual">Manual</option></select></label><label className="settings-field"><span>Rounding scale</span><select className="settings-input" value={String(settings.loanDefaults.rounding_scale)} onChange={e=>updateLoanDefault('rounding_scale',e.target.value)}>{[0,1,2,3,4].map(x=><option key={x} value={x}>{x} decimal places</option>)}</select></label></div>
+          <div className="settings-row">{([['part_payments_allowed','Allow part payments'],['receipt_required','Receipt required'],['write_off_allowed','Allow write-off']] as const).map(([key,label])=><label className="borrower-document-option" key={key}><input type="checkbox" checked={Boolean(settings.loanDefaults?.[key])} onChange={e=>updateLoanDefault(key,e.target.checked)}/>{label}</label>)}</div>
+          <div className="settings-actions"><button type="submit" className="primary-btn settings-save" disabled={isSaving}>{isSaving?'Saving…':'Save loan defaults'}</button></div>
+        </>}
       </form>
 
       <form className="card settings-card" onSubmit={(event) => void onSaveParty(event)}>

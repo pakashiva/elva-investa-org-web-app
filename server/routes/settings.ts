@@ -54,7 +54,8 @@ settingsRouter.get(
       res.status(404).json({ error: 'Client settings not found.' });
       return;
     }
-    res.json({ settings: mapSettings(result.rows[0]) });
+    const loanDefaults=await pool.query(`SELECT id,name,interest_model,interest_rate_percent,interest_rate_period,interest_frequency,repayment_model,repayment_frequency,payment_allocation,grace_period_days,overdue_rule,overdue_charge,part_payments_allowed,advance_payment_treatment,approval_workflow,receipt_required,write_off_allowed,closure_mode,rounding_scale,required_documents FROM loan_products WHERE client_id=$1 AND status='active' ORDER BY created_at LIMIT 1`,[clientId]);
+    res.json({ settings: { ...mapSettings(result.rows[0]), loanDefaults: loanDefaults.rows[0] ?? null } });
   })
 );
 
@@ -65,6 +66,12 @@ settingsRouter.patch(
     const body = (req.body ?? {}) as Record<string, unknown>;
     const hasSupport = body.supportEmail !== undefined || body.supportPhone !== undefined;
     const hasParty = body.agreementParty !== undefined || body.secondParty !== undefined;
+    if(body.loanDefaults && typeof body.loanDefaults==='object') {
+      const d=body.loanDefaults as Record<string,unknown>; const id=text(d.id);
+      const rate=Number(d.interest_rate_percent), charge=Number(d.overdue_charge), grace=Number(d.grace_period_days);
+      if(!id||!Number.isFinite(rate)||rate<0||rate>100||!Number.isFinite(charge)||charge<0||!Number.isInteger(grace)||grace<0){res.status(400).json({error:'Enter valid default loan terms.'});return;}
+      await pool.query(`UPDATE loan_products SET interest_model=$3,interest_rate_percent=$4,interest_rate_period=$5,interest_frequency=$6,repayment_model=$7,repayment_frequency=$8,payment_allocation=$9,grace_period_days=$10,overdue_rule=$11,overdue_charge=$12,part_payments_allowed=$13,advance_payment_treatment=$14,approval_workflow=$15,receipt_required=$16,write_off_allowed=$17,closure_mode=$18,rounding_scale=$19,updated_at=NOW() WHERE id=$1 AND client_id=$2 AND status='active'`,[id,clientId,d.interest_model,rate,d.interest_rate_period,d.interest_frequency,d.repayment_model,d.repayment_frequency,d.payment_allocation,grace,d.overdue_rule,charge,d.part_payments_allowed===true,d.advance_payment_treatment,d.approval_workflow,d.receipt_required===true,d.write_off_allowed===true,d.closure_mode,Number(d.rounding_scale??2)]);
+    }
 
     if (hasSupport) {
       const supportEmail = text(body.supportEmail);
@@ -109,6 +116,7 @@ settingsRouter.patch(
     }
 
     const result = await pool.query(SETTINGS_SQL, [clientId]);
-    res.json({ settings: mapSettings(result.rows[0]) });
+    const loanDefaults=await pool.query(`SELECT id,name,interest_model,interest_rate_percent,interest_rate_period,interest_frequency,repayment_model,repayment_frequency,payment_allocation,grace_period_days,overdue_rule,overdue_charge,part_payments_allowed,advance_payment_treatment,approval_workflow,receipt_required,write_off_allowed,closure_mode,rounding_scale,required_documents FROM loan_products WHERE client_id=$1 AND status='active' ORDER BY created_at LIMIT 1`,[clientId]);
+    res.json({ settings: { ...mapSettings(result.rows[0]), loanDefaults: loanDefaults.rows[0] ?? null } });
   })
 );

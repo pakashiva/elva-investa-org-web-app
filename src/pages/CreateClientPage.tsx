@@ -23,8 +23,6 @@ import {
   type ClientModule,
 } from '../types/borrowing';
 
-const PAYOUT_DAYS = [1, 5, 10, 15, 20, 25];
-
 type FormState = {
   name: string;
   clientCode: string;
@@ -309,20 +307,6 @@ export function CreateClientPage() {
               onChange={(event) => update('agreementCharges', event.target.value)}
               required
             />
-          </label>
-          <label className="settings-field">
-            <span>Payout day</span>
-            <select
-              className="settings-input"
-              value={form.payoutDay}
-              onChange={(event) => update('payoutDay', event.target.value)}
-            >
-              {PAYOUT_DAYS.map((day) => (
-                <option key={day} value={day}>
-                  {day}
-                </option>
-              ))}
-            </select>
           </label>
         </div>
         <div className="settings-row">

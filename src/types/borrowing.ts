@@ -51,18 +51,18 @@ export const EMPTY_BORROWING_SETUP: BorrowingSetupForm = {
   interestRatePercent: '',
   interestRatePeriod: '',
   interestFrequency: '',
-  repaymentModel: '',
+  repaymentModel: 'principal_and_interest',
   repaymentFrequency: '',
-  paymentAllocation: '',
+  paymentAllocation: 'interest_first',
   gracePeriodDays: '0',
   overdueRule: '',
   overdueCharge: '0',
-  partPaymentsAllowed: '',
-  advancePaymentTreatment: '',
-  approvalWorkflow: '',
-  receiptRequired: '',
-  writeOffAllowed: '',
-  closureMode: '',
+  partPaymentsAllowed: 'yes',
+  advancePaymentTreatment: 'cover_future_dues',
+  approvalWorkflow: 'manual',
+  receiptRequired: 'yes',
+  writeOffAllowed: 'no',
+  closureMode: 'automatic',
   roundingScale: '2',
   requiredDocuments: ['aadhaar', 'pan'],
 };
@@ -91,7 +91,6 @@ export function toBorrowingSetupInput(form: BorrowingSetupForm): BorrowingSetupI
 }
 
 export function validateBorrowingSetup(form: BorrowingSetupForm): string | null {
-  if (!form.name.trim()) return 'Enter a name for the default loan product.';
   if (!form.interestModel || !form.interestRatePeriod || !form.interestFrequency) {
     return 'Choose the interest model, rate period, and interest frequency.';
   }
@@ -99,9 +98,7 @@ export function validateBorrowingSetup(form: BorrowingSetupForm): string | null 
   if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
     return 'Enter an interest rate between 0 and 100 percent.';
   }
-  if (!form.repaymentModel || !form.repaymentFrequency || !form.paymentAllocation) {
-    return 'Choose the repayment model, frequency, and payment allocation order.';
-  }
+  if (!form.repaymentFrequency) return 'Choose the repayment frequency.';
   if (!Number.isInteger(Number(form.gracePeriodDays)) || Number(form.gracePeriodDays) < 0) {
     return 'Grace period must be a whole number of days, 0 or more.';
   }
@@ -112,16 +109,6 @@ export function validateBorrowingSetup(form: BorrowingSetupForm): string | null 
   }
   if (form.overdueRule === 'status_only' && overdueCharge !== 0) {
     return 'Set overdue charge to 0 when overdue treatment is status only.';
-  }
-  if (form.partPaymentsAllowed === '') return 'Choose whether part payments are allowed.';
-  if (!form.advancePaymentTreatment) return 'Choose how advance payments are treated.';
-  if (!form.approvalWorkflow) return 'Choose the loan approval workflow.';
-  if (form.receiptRequired === '' || form.writeOffAllowed === '') {
-    return 'Choose receipt and write-off policies.';
-  }
-  if (!form.closureMode) return 'Choose the loan closure policy.';
-  if (!Number.isInteger(Number(form.roundingScale)) || Number(form.roundingScale) < 0 || Number(form.roundingScale) > 4) {
-    return 'Choose a rounding precision from 0 to 4 decimal places.';
   }
   if (form.requiredDocuments.length === 0) return 'Choose at least one required borrower document.';
   return null;

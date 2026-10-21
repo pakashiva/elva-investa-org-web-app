@@ -21,6 +21,7 @@ import { SuperAdminClientPage } from '../pages/SuperAdminClientPage';
 import { TdsPage } from '../pages/TdsPage';
 import { WithdrawalsPage } from '../pages/WithdrawalsPage';
 import { BorrowingPage } from '../pages/BorrowingPage';
+import { BorrowingReportsPage } from '../pages/BorrowingReportsPage';
 
 function FullPageLoading() {
   return (
@@ -66,6 +67,12 @@ function ClientAdminRoutes({ borrowingEnabled, investingEnabled }: { borrowingEn
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/manage-passwords" element={<ManagePasswordsPage />} />
         {borrowingEnabled ? <Route path="/borrowing" element={<BorrowingPage />} /> : null}
+        {borrowingEnabled ? <Route path="/borrowing/loans" element={<BorrowingPage />} /> : null}
+        {borrowingEnabled ? <Route path="/borrowing/customers" element={<ClientCustomersPage />} /> : null}
+        {borrowingEnabled ? <Route path="/borrowing/reports" element={<BorrowingReportsPage />} /> : null}
+        {borrowingEnabled ? <Route path="/borrowing/notifications" element={<NotificationsPage />} /> : null}
+        {borrowingEnabled ? <Route path="/borrowing/settings" element={<SettingsPage />} /> : null}
+        {borrowingEnabled ? <Route path="/borrowing/manage-passwords" element={<ManagePasswordsPage />} /> : null}
         <Route path="/contact-ops" element={<ContactOpsPage />} />
       </Route>
       <Route path="/login" element={<Navigate to="/" replace />} />

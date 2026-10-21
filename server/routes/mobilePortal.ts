@@ -14,7 +14,7 @@ mobilePortalRouter.get('/account-capabilities', asyncHandler(async (req, res) =>
   const result = await pool.query(`SELECT c.customer_type,cl.enabled_modules,
       EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account,
       EXISTS(SELECT 1 FROM borrowers b JOIN loans l ON l.borrower_id=b.id AND l.client_id=b.client_id
-        WHERE b.client_id=c.client_id AND b.customer_id=c.id AND l.status IN ('pending_approval','approved','active','overdue')) AS has_open_loan
+        WHERE b.client_id=c.client_id AND b.customer_id=c.id AND l.status IN ('pending_approval','pending_customer_acceptance','approved','active','overdue')) AS has_open_loan
     FROM customers c JOIN clients cl ON cl.id=c.client_id
     WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active'`, [customer.id, customer.clientId]);
   if (!result.rowCount) { res.status(404).json({ error: 'Account not found.' }); return; }
@@ -39,7 +39,7 @@ mobilePortalRouter.post('/account-capabilities', asyncHandler(async (req, res) =
     const result = await db.query(`SELECT c.customer_type,cl.enabled_modules,
       EXISTS(SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id AND b.status='active') AS has_borrower_account,
       EXISTS(SELECT 1 FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
-          WHERE b.client_id=c.client_id AND b.customer_id=c.id AND l.status IN ('pending_approval','approved','active','overdue')) AS has_open_loan
+          WHERE b.client_id=c.client_id AND b.customer_id=c.id AND l.status IN ('pending_approval','pending_customer_acceptance','approved','active','overdue')) AS has_open_loan
       FROM customers c JOIN clients cl ON cl.id=c.client_id
       WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active' FOR UPDATE OF c`, [customer.id, customer.clientId]);
     if (!result.rowCount) { await db.query('ROLLBACK'); res.status(404).json({ error: 'Account not found.' }); return; }
@@ -99,6 +99,41 @@ mobilePortalRouter.get('/borrowing/products', asyncHandler(async (req, res) => {
 
 mobilePortalRouter.post('/borrowing/requests', asyncHandler(async (req, res) => {
   const customer = (req as CustomerRequest).customer;
+  if (text(req.body?.requestType) === 'custom') {
+    const principal = Number(req.body?.principalAmount), days = Number(req.body?.durationDays);
+    const requestedRateRaw = req.body?.requestedInterestRatePercent;
+    const requestedRate = requestedRateRaw === '' || requestedRateRaw == null ? null : Number(requestedRateRaw);
+    const submissionKey = text(req.body?.submissionKey);
+    const preference = text(req.body?.repaymentPreference), purpose = text(req.body?.purpose), notes = text(req.body?.notes).slice(0, 500);
+    if (!Number.isFinite(principal) || principal <= 0 || principal > 1_000_000_000 || !Number.isInteger(days) || days < 1 || days > 3650 || !['maturity','flexible'].includes(preference) || !purpose || !/^[a-zA-Z0-9_-]{12,100}$/.test(submissionKey) || (requestedRate !== null && (!Number.isFinite(requestedRate) || requestedRate < 0 || requestedRate > 100))) {
+      res.status(400).json({ error: 'Review the amount, term, requested interest, repayment preference, and purpose.' }); return;
+    }
+    const db = await pool.connect();
+    try {
+      await db.query('BEGIN');
+      const account = await db.query(`SELECT c.customer_type FROM customers c JOIN clients cl ON cl.id=c.client_id WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active' AND 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) FOR UPDATE OF c`, [customer.id,customer.clientId]);
+      const existingBorrower = await db.query(`SELECT id FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`,[customer.clientId,customer.id]);
+      if (!account.rowCount || (!['borrower','both'].includes(account.rows[0].customer_type) && !existingBorrower.rowCount)) { await db.query('ROLLBACK'); res.status(403).json({error:'Borrowing is not enabled for your account.'}); return; }
+      const productResult = await db.query(`SELECT * FROM loan_products WHERE client_id=$1 AND status='active' ORDER BY created_at LIMIT 1 FOR SHARE`,[customer.clientId]);
+      const product = productResult.rows[0];
+      if (!product) { await db.query('ROLLBACK'); res.status(404).json({error:'No active loan product is available.'}); return; }
+      const borrowerResult = await db.query(`INSERT INTO borrowers (client_id,customer_id,status) VALUES ($1,$2,'active') ON CONFLICT (client_id,customer_id) DO UPDATE SET status='active',updated_at=NOW() RETURNING id`,[customer.clientId,customer.id]);
+      await db.query(`UPDATE customers SET customer_type=CASE WHEN customer_type='investor' THEN 'both' ELSE customer_type END WHERE id=$1 AND client_id=$2`,[customer.id,customer.clientId]);
+      const serial = await db.query(`SELECT nextval('loan_number_seq') AS n`), loanNumber = `LN-${String(serial.rows[0].n).padStart(8,'0')}`;
+      const terms = {...product,request_type:'custom',requested_amount:principal,requested_interest_rate_percent:requestedRate,custom_duration_days:days,repayment_preference:preference,purpose,borrower_notes:notes};
+      const inserted = await db.query(`INSERT INTO loans (client_id,borrower_id,product_id,loan_number,status,principal_amount,interest_rate_percent,terms_snapshot,request_type,custom_duration_days,repayment_preference,submission_key)
+        VALUES ($1,$2,$3,$4,'pending_approval',$5,$6,$7::jsonb,'custom',$8,$9,$10)
+        ON CONFLICT (client_id,borrower_id,submission_key) WHERE request_type='custom' AND submission_key IS NOT NULL DO NOTHING
+        RETURNING id,loan_number,status`,[customer.clientId,borrowerResult.rows[0].id,product.id,loanNumber,principal,product.interest_rate_percent,JSON.stringify(terms),days,preference,submissionKey]);
+      if(!inserted.rowCount){
+        const existing=await db.query(`SELECT id,loan_number,status FROM loans WHERE client_id=$1 AND borrower_id=$2 AND request_type='custom' AND submission_key=$3`,[customer.clientId,borrowerResult.rows[0].id,submissionKey]);
+        await db.query('COMMIT'); res.status(200).json({loanId:existing.rows[0].id,loanNumber:existing.rows[0].loan_number,status:existing.rows[0].status}); return;
+      }
+      await db.query(`INSERT INTO loan_audit_logs (client_id,entity_type,entity_id,action,changes) VALUES ($1,'loan',$2,'customer_requested',$3::jsonb)`,[customer.clientId,inserted.rows[0].id,JSON.stringify({requestType:'custom',principalAmount:principal,requestedInterestRatePercent:requestedRate,durationDays:days,repaymentPreference:preference,purpose})]);
+      await db.query('COMMIT'); res.status(201).json({loanId:inserted.rows[0].id,loanNumber,status:'pending_approval'});
+    } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+    return;
+  }
   const productId = text(req.body?.productId);
   const principal = Number(req.body?.principalAmount);
   const termMonths = Number(req.body?.termMonths);
@@ -166,6 +201,26 @@ mobilePortalRouter.post('/borrowing/requests', asyncHandler(async (req, res) => 
   } catch (error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
 }));
 
+mobilePortalRouter.patch('/borrowing/requests/:loanId/offer-response', asyncHandler(async (req,res) => {
+  const customer=(req as CustomerRequest).customer, loanId=text(req.params.loanId), accept=req.body?.accept===true;
+  if(!isUuid(loanId)){res.status(404).json({error:'Loan request not found.'});return;}
+  const db=await pool.connect();
+  try{
+    await db.query('BEGIN');
+    const selected=await db.query(`SELECT l.*,b.customer_id FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id WHERE l.id=$1 AND l.client_id=$2 AND b.customer_id=$3 AND l.request_type='custom' AND l.status='pending_customer_acceptance' FOR UPDATE OF l`,[loanId,customer.clientId,customer.id]);
+    if(!selected.rowCount){await db.query('ROLLBACK');res.status(409).json({error:'This custom offer is no longer awaiting your decision.'});return;}
+    const loan=selected.rows[0],offer=loan.counter_offer;
+    if(!offer){await db.query('ROLLBACK');res.status(409).json({error:'The offer terms are unavailable.'});return;}
+    if(accept){
+      await db.query(`UPDATE loans SET status='approved',principal_amount=$3,interest_rate_percent=$4,custom_duration_days=$5,repayment_preference=$6,terms_snapshot=terms_snapshot||$7::jsonb,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[loanId,customer.clientId,offer.principal_amount,offer.interest_rate_percent,offer.duration_days,offer.repayment_preference,JSON.stringify({custom_offer:offer,request_type:'custom'})]);
+    }else{
+      await db.query(`UPDATE loans SET status='cancelled',updated_at=NOW() WHERE id=$1 AND client_id=$2`,[loanId,customer.clientId]);
+    }
+    await db.query(`INSERT INTO loan_audit_logs (client_id,entity_type,entity_id,action,changes) VALUES ($1,'loan',$2,$3,$4::jsonb)`,[customer.clientId,loanId,accept?'offer_accepted':'offer_declined',JSON.stringify({offer})]);
+    await db.query('COMMIT'); res.json({status:accept?'approved':'cancelled'});
+  }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+}));
+
 mobilePortalRouter.get('/borrowing/loans', asyncHandler(async (req, res) => {
   const customer = (req as CustomerRequest).customer;
   const access = await pool.query(`SELECT c.customer_type, 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) AS enabled
@@ -173,7 +228,7 @@ mobilePortalRouter.get('/borrowing/loans', asyncHandler(async (req, res) => {
   const borrower = await pool.query(`SELECT 1 FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`, [customer.clientId, customer.id]);
   if (!access.rows[0]?.enabled || (!['borrower', 'both'].includes(access.rows[0]?.customer_type) && !borrower.rowCount)) { res.status(403).json({ error: 'Borrowing is not enabled for your account.' }); return; }
   const loans = await pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,
-      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.created_at,
+      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.created_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,
       lp.name AS product_name,lp.interest_model,lp.interest_rate_period,lp.repayment_model,
       lp.repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
     FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
@@ -211,7 +266,7 @@ mobilePortalRouter.get('/borrowing/loans/:loanId', asyncHandler(async (req, res)
   const loanId = text(req.params.loanId);
   if (!isUuid(loanId)) { res.status(404).json({ error: 'Loan not found.' }); return; }
   const loan = await pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,
-      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,
+      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,
       lp.name AS product_name,lp.interest_model,lp.interest_rate_period,lp.repayment_model,
       lp.repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
     FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id

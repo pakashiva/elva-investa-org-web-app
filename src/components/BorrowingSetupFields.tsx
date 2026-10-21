@@ -45,10 +45,6 @@ export function BorrowingSetupFields({ value, onChange }: Props) {
         so later changes do not rewrite existing loan terms.
       </p>
       <div className="create-grid">
-        <label className="create-field">
-          <span>Default loan product name *</span>
-          <input value={value.name} onChange={(event) => set('name', event.target.value)} required />
-        </label>
         {selectField('Interest calculation model', 'interestModel', [
           ['simple', 'Simple interest'],
           ['flat', 'Flat rate'],
@@ -74,17 +70,9 @@ export function BorrowingSetupFields({ value, onChange }: Props) {
           ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly'],
           ['quarterly', 'Quarterly'], ['at_maturity', 'At maturity'],
         ])}
-        {selectField('Repayment model', 'repaymentModel', [
-          ['interest_only', 'Interest only'],
-          ['principal_and_interest', 'Principal and interest'],
-          ['bullet', 'Single payment at maturity'],
-        ])}
         {selectField('Repayment frequency', 'repaymentFrequency', [
           ['weekly', 'Weekly'], ['monthly', 'Monthly'], ['quarterly', 'Quarterly'],
           ['at_maturity', 'At maturity'],
-        ])}
-        {selectField('Payment allocation order', 'paymentAllocation', [
-          ['interest_first', 'Interest first'], ['principal_first', 'Principal first'],
         ])}
         <label className="create-field">
           <span>Grace period (days) *</span>
@@ -113,35 +101,6 @@ export function BorrowingSetupFields({ value, onChange }: Props) {
             required
           />
           <small className="field-hint">Percentage for percentage charge; currency amount for fixed charge.</small>
-        </label>
-        {selectField('Part payments', 'partPaymentsAllowed', [['yes', 'Allowed'], ['no', 'Not allowed']])}
-        {selectField('Advance payment treatment', 'advancePaymentTreatment', [
-          ['reduce_principal', 'Reduce principal'],
-          ['cover_future_dues', 'Cover future dues'],
-          ['credit_balance', 'Keep as a credit balance'],
-        ])}
-        {selectField('Loan approval', 'approvalWorkflow', [
-          ['manual', 'Manual approval'], ['direct_activation', 'Direct activation'],
-        ])}
-        <label className="create-field">
-          <span>Disbursement *</span>
-          <input value="Manual record by Client Admin" readOnly required />
-          <small className="field-hint">The app records disbursement; it does not move money.</small>
-        </label>
-        {selectField('Payment receipt', 'receiptRequired', [['yes', 'Required'], ['no', 'Not required']])}
-        {selectField('Write-offs', 'writeOffAllowed', [['yes', 'Allowed'], ['no', 'Not allowed']])}
-        {selectField('Loan closure', 'closureMode', [
-          ['automatic', 'Automatic when paid in full'], ['manual', 'Client Admin closes manually'],
-        ])}
-        <label className="create-field">
-          <span>Rounding decimal places *</span>
-          <select
-            value={value.roundingScale}
-            onChange={(event) => set('roundingScale', event.target.value)}
-            required
-          >
-            {[0, 1, 2, 3, 4].map((scale) => <option key={scale} value={scale}>{scale}</option>)}
-          </select>
         </label>
       </div>
       <fieldset className="create-field borrower-documents-fieldset">
