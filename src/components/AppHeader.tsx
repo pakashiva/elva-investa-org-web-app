@@ -28,6 +28,7 @@ export function AppHeader({
   const borrowingEnabled = admin?.enabledModules?.includes('borrow') ?? false;
   const investingEnabled = admin?.enabledModules?.includes('invest') ?? true;
   const borrowingActive = location.pathname.startsWith('/borrowing');
+  const allActive = location.pathname.startsWith('/all') || new URLSearchParams(location.search).get('workspace') === 'all';
   const unreadCount = useUnreadCount();
   const displayName = admin?.fullName || admin?.full_name || 'Admin';
 
@@ -41,17 +42,20 @@ export function AppHeader({
         </div>
       </div>
 
-      <div className="header-tools">
-        {isClientAdmin && borrowingEnabled && investingEnabled ? (
-          <div className="module-switch" role="group" aria-label="Choose workspace module">
-            <button type="button" className={!borrowingActive ? 'active' : ''} aria-pressed={!borrowingActive} onClick={() => navigate('/')}>
+      {isClientAdmin && borrowingEnabled && investingEnabled ? (
+        <div className="module-switch" role="group" aria-label="Choose workspace module">
+          <button type="button" className={!borrowingActive && !allActive ? 'active' : ''} aria-pressed={!borrowingActive && !allActive} onClick={() => navigate('/')}>
               Investment
-            </button>
-            <button type="button" className={borrowingActive ? 'active' : ''} aria-pressed={borrowingActive} onClick={() => navigate('/borrowing')}>
+          </button>
+          <button type="button" className={borrowingActive ? 'active' : ''} aria-pressed={borrowingActive} onClick={() => navigate('/borrowing')}>
               Borrowing
-            </button>
-          </div>
-        ) : null}
+          </button>
+          <button type="button" className={allActive ? 'active' : ''} aria-pressed={allActive} onClick={() => navigate('/all')}>
+            All
+          </button>
+        </div>
+      ) : null}
+      <div className="header-tools">
         {isClientAdmin && showSearch ? (
           <form className="search-pill" onSubmit={(event) => event.preventDefault()}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -64,7 +68,7 @@ export function AppHeader({
         {actions}
         {isClientAdmin ? (
           <Link
-            to={borrowingActive ? '/borrowing/notifications' : '/notifications'}
+            to={allActive ? '/notifications?workspace=all' : borrowingActive ? '/borrowing/notifications' : '/notifications'}
             className="icon-btn notify-btn"
             aria-label={
               unreadCount > 0

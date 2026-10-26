@@ -22,6 +22,7 @@ import { TdsPage } from '../pages/TdsPage';
 import { WithdrawalsPage } from '../pages/WithdrawalsPage';
 import { BorrowingPage } from '../pages/BorrowingPage';
 import { BorrowingReportsPage } from '../pages/BorrowingReportsPage';
+import { AllActivityPage } from '../pages/AllActivityPage';
 
 function FullPageLoading() {
   return (
@@ -54,6 +55,7 @@ function ClientAdminRoutes({ borrowingEnabled, investingEnabled }: { borrowingEn
     <Routes>
       <Route element={<AdminLayout />}>
         <Route path="/" element={<ClientDashboardPage />} />
+        {borrowingEnabled && investingEnabled ? <Route path="/all" element={<AllActivityPage />} /> : null}
         <Route path="/customers" element={<ClientCustomersPage />} />
         <Route path="/customers/:userId" element={<ClientCustomersPage />} />
         {investingEnabled ? <Route path="/investment-requests" element={<InvestmentRequestsPage />} /> : null}

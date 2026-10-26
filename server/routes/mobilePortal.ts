@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db';
+import { ensureRegularInterestSchedules } from '../regularLoanSchedules';
 import { asyncHandler, requireCustomer } from '../middleware';
 import type { CustomerRequest } from '../types';
 import { toDateOnly } from '../customerView';
@@ -99,13 +100,68 @@ mobilePortalRouter.get('/borrowing/products', asyncHandler(async (req, res) => {
 
 mobilePortalRouter.post('/borrowing/requests', asyncHandler(async (req, res) => {
   const customer = (req as CustomerRequest).customer;
+  if (text(req.body?.requestType) === 'regular') {
+    const productId=text(req.body?.productId), principal=Number(req.body?.principalAmount), rate=Number(req.body?.requestedInterestRatePercent);
+    const purpose=text(req.body?.purpose), notes=text(req.body?.notes).slice(0,500), submissionKey=text(req.body?.submissionKey);
+    if(!isUuid(productId)||!Number.isFinite(principal)||principal<=0||principal>1_000_000_000||!Number.isFinite(rate)||rate<0||rate>100||!purpose||! /^[a-zA-Z0-9_-]{12,100}$/.test(submissionKey)){
+      res.status(400).json({error:'Review the amount, requested monthly interest rate, purpose, and request details.'});return;
+    }
+    const db=await pool.connect();
+    try{
+      await db.query('BEGIN');
+      const account=await db.query(`SELECT customer_type FROM customers WHERE id=$1 AND client_id=$2 AND status='active' FOR UPDATE`,[customer.id,customer.clientId]);
+      const borrower=await db.query(`SELECT id FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`,[customer.clientId,customer.id]);
+      if(!['borrower','both'].includes(account.rows[0]?.customer_type)&&!borrower.rowCount){await db.query('ROLLBACK');res.status(403).json({error:'Borrowing is not enabled for your account.'});return;}
+      const productResult=await db.query(`SELECT * FROM loan_products WHERE id=$1 AND client_id=$2 AND status='active' FOR SHARE`,[productId,customer.clientId]);
+      if(!productResult.rowCount){await db.query('ROLLBACK');res.status(404).json({error:'This loan product is no longer available.'});return;}
+      const borrowerResult=await db.query(`INSERT INTO borrowers (client_id,customer_id,status) VALUES ($1,$2,'active') ON CONFLICT (client_id,customer_id) DO UPDATE SET status='active',updated_at=NOW() RETURNING id`,[customer.clientId,customer.id]);
+      await db.query(`UPDATE customers SET customer_type=CASE WHEN customer_type='investor' THEN 'both' ELSE customer_type END WHERE id=$1 AND client_id=$2`,[customer.id,customer.clientId]);
+      const serial=await db.query(`SELECT nextval('loan_number_seq') AS n`),loanNumber=`LN-${String(serial.rows[0].n).padStart(8,'0')}`;
+      const terms={...productResult.rows[0],request_type:'regular',requested_interest_rate_percent:rate,interest_model:'simple',interest_rate_period:'monthly',interest_frequency:'monthly',repayment_model:'interest_only',repayment_frequency:'monthly',part_payments_allowed:true,payment_allocation:'interest_first',purpose,borrower_notes:notes};
+      const inserted=await db.query(`INSERT INTO loans (client_id,borrower_id,product_id,loan_number,status,principal_amount,interest_rate_percent,terms_snapshot,request_type,submission_key)
+        VALUES ($1,$2,$3,$4,'pending_approval',$5,$6,$7::jsonb,'regular',$8)
+        ON CONFLICT (client_id,borrower_id,submission_key) WHERE request_type='regular' AND submission_key IS NOT NULL DO NOTHING
+        RETURNING id,loan_number,status`,[customer.clientId,borrowerResult.rows[0].id,productId,loanNumber,principal,rate,JSON.stringify(terms),submissionKey]);
+      if(!inserted.rowCount){const existing=await db.query(`SELECT id,loan_number,status FROM loans WHERE client_id=$1 AND borrower_id=$2 AND request_type='regular' AND submission_key=$3`,[customer.clientId,borrowerResult.rows[0].id,submissionKey]);await db.query('COMMIT');res.status(200).json({loanId:existing.rows[0].id,loanNumber:existing.rows[0].loan_number,status:existing.rows[0].status});return;}
+      await db.query(`INSERT INTO loan_audit_logs (client_id,entity_type,entity_id,action,changes) VALUES ($1,'loan',$2,'customer_requested',$3::jsonb)`,[customer.clientId,inserted.rows[0].id,JSON.stringify({requestType:'regular',principalAmount:principal,requestedInterestRatePercent:rate,purpose})]);
+      await db.query('COMMIT');res.status(201).json({loanId:inserted.rows[0].id,loanNumber,status:'pending_approval'});
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    return;
+  }
+  if (text(req.body?.requestType) === 'daily') {
+    const productId=text(req.body?.productId),principal=Number(req.body?.principalAmount),days=Number(req.body?.collectionDays),months=Number(req.body?.interestDurationMonths);
+    const purpose=text(req.body?.purpose),notes=text(req.body?.notes).slice(0,500),submissionKey=text(req.body?.submissionKey);
+    if(!isUuid(productId)||!Number.isFinite(principal)||principal<=0||principal>1_000_000_000||!Number.isInteger(days)||days<1||days>3650||!Number.isInteger(months)||months<1||months>600||!purpose||! /^[a-zA-Z0-9_-]{12,100}$/.test(submissionKey)){
+      res.status(400).json({error:'Review the requested amount, daily collection term, interest duration, and purpose.'});return;
+    }
+    const db=await pool.connect();
+    try{
+      await db.query('BEGIN');
+      const account=await db.query(`SELECT c.customer_type FROM customers c JOIN clients cl ON cl.id=c.client_id WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active' AND 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) FOR UPDATE OF c`,[customer.id,customer.clientId]);
+      const existingBorrower=await db.query(`SELECT id FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`,[customer.clientId,customer.id]);
+      if(!account.rowCount||(!['borrower','both'].includes(account.rows[0].customer_type)&&!existingBorrower.rowCount)){await db.query('ROLLBACK');res.status(403).json({error:'Borrowing is not enabled for your account.'});return;}
+      const product=await db.query(`SELECT * FROM loan_products WHERE id=$1 AND client_id=$2 AND status='active' FOR SHARE`,[productId,customer.clientId]);
+      if(!product.rowCount){await db.query('ROLLBACK');res.status(404).json({error:'This loan product is no longer available.'});return;}
+      const borrower=await db.query(`INSERT INTO borrowers(client_id,customer_id,status) VALUES($1,$2,'active') ON CONFLICT(client_id,customer_id) DO UPDATE SET status='active',updated_at=NOW() RETURNING id`,[customer.clientId,customer.id]);
+      await db.query(`UPDATE customers SET customer_type=CASE WHEN customer_type='investor' THEN 'both' ELSE customer_type END WHERE id=$1 AND client_id=$2`,[customer.id,customer.clientId]);
+      const seq=await db.query(`SELECT nextval('loan_number_seq') AS n`),loanNumber=`LN-${String(seq.rows[0].n).padStart(8,'0')}`;
+      const terms={...product.rows[0],request_type:'daily',requested_amount:principal,requested_collection_days:days,collection_days:days,interest_duration_months:months,requested_monthly_interest_rate_percent:product.rows[0].interest_rate_percent,purpose,borrower_notes:notes};
+      const inserted=await db.query(`INSERT INTO loans(client_id,borrower_id,product_id,loan_number,status,principal_amount,interest_rate_percent,terms_snapshot,request_type,custom_duration_days,submission_key)
+        VALUES($1,$2,$3,$4,'pending_approval',$5,$6,$7::jsonb,'daily',$8,$9)
+        ON CONFLICT(client_id,borrower_id,submission_key) WHERE request_type='daily' AND submission_key IS NOT NULL DO NOTHING RETURNING id,loan_number,status`,[customer.clientId,borrower.rows[0].id,productId,loanNumber,principal,product.rows[0].interest_rate_percent,JSON.stringify(terms),days,submissionKey]);
+      if(!inserted.rowCount){const old=await db.query(`SELECT id,loan_number,status FROM loans WHERE client_id=$1 AND borrower_id=$2 AND request_type='daily' AND submission_key=$3`,[customer.clientId,borrower.rows[0].id,submissionKey]);await db.query('COMMIT');res.json({loanId:old.rows[0].id,loanNumber:old.rows[0].loan_number,status:old.rows[0].status});return;}
+      await db.query(`INSERT INTO loan_audit_logs(client_id,entity_type,entity_id,action,changes) VALUES($1,'loan',$2,'customer_requested',$3::jsonb)`,[customer.clientId,inserted.rows[0].id,JSON.stringify({requestType:'daily',requestedAmount:principal,collectionDays:days,interestDurationMonths:months,purpose})]);
+      await db.query('COMMIT');res.status(201).json({loanId:inserted.rows[0].id,loanNumber,status:'pending_approval'});
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    return;
+  }
   if (text(req.body?.requestType) === 'custom') {
     const principal = Number(req.body?.principalAmount), days = Number(req.body?.durationDays);
     const requestedRateRaw = req.body?.requestedInterestRatePercent;
     const requestedRate = requestedRateRaw === '' || requestedRateRaw == null ? null : Number(requestedRateRaw);
     const submissionKey = text(req.body?.submissionKey);
-    const preference = text(req.body?.repaymentPreference), purpose = text(req.body?.purpose), notes = text(req.body?.notes).slice(0, 500);
-    if (!Number.isFinite(principal) || principal <= 0 || principal > 1_000_000_000 || !Number.isInteger(days) || days < 1 || days > 3650 || !['maturity','flexible'].includes(preference) || !purpose || !/^[a-zA-Z0-9_-]{12,100}$/.test(submissionKey) || (requestedRate !== null && (!Number.isFinite(requestedRate) || requestedRate < 0 || requestedRate > 100))) {
+    const preference = 'maturity', purpose = text(req.body?.purpose), notes = text(req.body?.notes).slice(0, 500);
+    if (!Number.isFinite(principal) || principal <= 0 || principal > 1_000_000_000 || !Number.isInteger(days) || days < 1 || days > 3650 || requestedRate===null || !Number.isFinite(requestedRate) || requestedRate<0 || requestedRate>100 || !purpose || !/^[a-zA-Z0-9_-]{12,100}$/.test(submissionKey)) {
       res.status(400).json({ error: 'Review the amount, term, requested interest, repayment preference, and purpose.' }); return;
     }
     const db = await pool.connect();
@@ -201,6 +257,39 @@ mobilePortalRouter.post('/borrowing/requests', asyncHandler(async (req, res) => 
   } catch (error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
 }));
 
+mobilePortalRouter.post('/borrowing/loans/:loanId/rollover-requests', asyncHandler(async(req,res)=>{
+  const customer=(req as CustomerRequest).customer,loanId=text(req.params.loanId);
+  const days=Number(req.body?.durationDays),rate=Number(req.body?.requestedInterestRatePercent),purpose=text(req.body?.purpose)||'custom_loan_rollover',notes=text(req.body?.notes).slice(0,500),submissionKey=text(req.body?.submissionKey);
+  if(!isUuid(loanId)||!Number.isInteger(days)||days<1||days>3650||!Number.isFinite(rate)||rate<0||rate>100||! /^[a-zA-Z0-9_-]{12,100}$/.test(submissionKey)){
+    res.status(400).json({error:'Enter a valid rollover term, requested flat interest rate, and request key.'});return;
+  }
+  const db=await pool.connect();
+  try{
+    await db.query('BEGIN');
+    const todayResult=await db.query(`SELECT public.admin_ist_today()::text AS today`),today=String(todayResult.rows[0].today);
+    const parent=await db.query(`SELECT l.*,b.id AS borrower_id,b.customer_id FROM loans l
+      JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
+      WHERE l.id=$1 AND l.client_id=$2 AND b.customer_id=$3 AND l.request_type='custom'
+        AND l.status IN ('active','overdue') AND l.maturity_date<=public.admin_ist_today() FOR UPDATE OF l`,[loanId,customer.clientId,customer.id]);
+    if(!parent.rowCount){await db.query('ROLLBACK');res.status(409).json({error:'A rollover can be requested only for your matured custom loan.'});return;}
+    const balance=await db.query(`SELECT COALESCE(SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)),0) AS amount
+      FROM loan_schedules s WHERE s.client_id=$1 AND s.loan_id=$2 AND s.status NOT IN ('paid','waived')`,[customer.clientId,loanId]);
+    const principal=Number(balance.rows[0].amount);
+    if(principal<=0.005){await db.query('ROLLBACK');res.status(409).json({error:'This loan has no remaining balance to roll over.'});return;}
+    const existing=await db.query(`SELECT id,loan_number,status FROM loans WHERE client_id=$1 AND borrower_id=$2 AND request_type='custom' AND submission_key=$3`,[customer.clientId,parent.rows[0].borrower_id,submissionKey]);
+    if(existing.rowCount){await db.query('COMMIT');res.json({loanId:existing.rows[0].id,loanNumber:existing.rows[0].loan_number,status:existing.rows[0].status});return;}
+    const pending=await db.query(`SELECT id FROM loans WHERE client_id=$1 AND rollover_from_loan_id=$2 AND status IN ('pending_approval','pending_customer_acceptance','approved','active','overdue') LIMIT 1`,[customer.clientId,loanId]);
+    if(pending.rowCount){await db.query('ROLLBACK');res.status(409).json({error:'A rollover request for this loan is already being reviewed or has been accepted.'});return;}
+    const serial=await db.query(`SELECT nextval('loan_number_seq') AS n`),loanNumber=`LN-${String(serial.rows[0].n).padStart(8,'0')}`;
+    const terms={...parent.rows[0].terms_snapshot,request_type:'custom',is_rollover:true,rollover_from_loan_id:loanId,requested_interest_rate_percent:rate,custom_duration_days:days,repayment_preference:'maturity',purpose,borrower_notes:notes,rollover_requested_on:today};
+    const inserted=await db.query(`INSERT INTO loans (client_id,borrower_id,product_id,loan_number,status,principal_amount,interest_rate_percent,terms_snapshot,request_type,custom_duration_days,repayment_preference,submission_key,rollover_from_loan_id)
+      VALUES ($1,$2,$3,$4,'pending_approval',$5,$6,$7::jsonb,'custom',$8,'maturity',$9,$10)
+      RETURNING id,loan_number,status`,[customer.clientId,parent.rows[0].borrower_id,parent.rows[0].product_id,loanNumber,principal,parent.rows[0].interest_rate_percent,JSON.stringify(terms),days,submissionKey,loanId]);
+    await db.query(`INSERT INTO loan_audit_logs (client_id,entity_type,entity_id,action,changes) VALUES ($1,'loan',$2,'customer_requested_rollover',$3::jsonb)`,[customer.clientId,inserted.rows[0].id,JSON.stringify({rolloverFromLoanId:loanId,principalAmount:principal,durationDays:days,requestedInterestRatePercent:rate})]);
+    await db.query('COMMIT');res.status(201).json({loanId:inserted.rows[0].id,loanNumber:inserted.rows[0].loan_number,status:'pending_approval'});
+  }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+}));
+
 mobilePortalRouter.patch('/borrowing/requests/:loanId/offer-response', asyncHandler(async (req,res) => {
   const customer=(req as CustomerRequest).customer, loanId=text(req.params.loanId), accept=req.body?.accept===true;
   if(!isUuid(loanId)){res.status(404).json({error:'Loan request not found.'});return;}
@@ -212,7 +301,41 @@ mobilePortalRouter.patch('/borrowing/requests/:loanId/offer-response', asyncHand
     const loan=selected.rows[0],offer=loan.counter_offer;
     if(!offer){await db.query('ROLLBACK');res.status(409).json({error:'The offer terms are unavailable.'});return;}
     if(accept){
-      await db.query(`UPDATE loans SET status='approved',principal_amount=$3,interest_rate_percent=$4,custom_duration_days=$5,repayment_preference=$6,terms_snapshot=terms_snapshot||$7::jsonb,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[loanId,customer.clientId,offer.principal_amount,offer.interest_rate_percent,offer.duration_days,offer.repayment_preference,JSON.stringify({custom_offer:offer,request_type:'custom'})]);
+      if(loan.rollover_from_loan_id){
+        const parent=await db.query(`SELECT id,borrower_id,loan_number,status,terms_snapshot FROM loans WHERE id=$1 AND client_id=$2 AND status IN ('active','overdue') FOR UPDATE`,[loan.rollover_from_loan_id,customer.clientId]);
+        if(!parent.rowCount){await db.query('ROLLBACK');res.status(409).json({error:'The original loan is no longer eligible for rollover.'});return;}
+        const parentSchedules=await db.query(`SELECT principal_due,interest_due,overdue_charge,amount_paid FROM loan_schedules WHERE client_id=$1 AND loan_id=$2 AND status NOT IN ('paid','waived') FOR UPDATE`,[customer.clientId,parent.rows[0].id]);
+        const remaining={principal:0,interest:0,overdue:0};
+        const order=parent.rows[0].terms_snapshot?.payment_allocation==='principal_first'?['principal','interest','overdue'] as const:['overdue','interest','principal'] as const;
+        for(const schedule of parentSchedules.rows){
+          const components={principal:Number(schedule.principal_due),interest:Number(schedule.interest_due),overdue:Number(schedule.overdue_charge)};let paid=Number(schedule.amount_paid);
+          for(const component of order){const applied=Math.min(components[component],paid);components[component]-=applied;paid=Math.max(0,paid-applied);}
+          remaining.principal+=components.principal;remaining.interest+=components.interest;remaining.overdue+=components.overdue;
+        }
+        const balanceAmount=remaining.principal+remaining.interest+remaining.overdue;
+        if(Math.abs(balanceAmount-Number(offer.principal_amount))>0.005){await db.query('ROLLBACK');res.status(409).json({error:'The remaining balance changed while this rollover offer was being reviewed. Ask your client for an updated offer.'});return;}
+        const todayResult=await db.query(`SELECT public.admin_ist_today()::text AS today`),start=String(todayResult.rows[0].today),due=new Date(`${start}T00:00:00Z`);
+        due.setUTCDate(due.getUTCDate()+Number(offer.duration_days));const maturity=due.toISOString().slice(0,10);
+        const principal=Number(offer.principal_amount),rate=Number(offer.interest_rate_percent),interest=Number((principal*rate/100).toFixed(2));
+        const snapshot={...loan.terms_snapshot,custom_offer:offer,request_type:'custom',is_rollover:true,rollover_from_loan_id:parent.rows[0].id,repayment_preference:'maturity',interest_rate_percent:rate,interest_model:'flat',interest_rate_period:'at_maturity'};
+        await db.query(`UPDATE loans SET status='rolled_over',closed_at=NOW(),close_reason=$3,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[parent.rows[0].id,customer.clientId,`Rolled over to ${loan.loan_number}`]);
+        await db.query(`INSERT INTO loan_audit_logs (client_id,entity_type,entity_id,action,changes) VALUES ($1,'loan',$2,'rolled_over',$3::jsonb)`,[customer.clientId,parent.rows[0].id,JSON.stringify({rolloverLoanId:loanId,amount:principal})]);
+        await db.query(`UPDATE loan_schedules SET status='paid',amount_paid=principal_due+interest_due+overdue_charge,updated_at=NOW() WHERE client_id=$1 AND loan_id=$2 AND status NOT IN ('paid','waived')`,[customer.clientId,parent.rows[0].id]);
+        await db.query(`UPDATE collection_tasks SET status='completed',completed_at=NOW() WHERE client_id=$1 AND loan_id=$2 AND status='pending'`,[customer.clientId,parent.rows[0].id]);
+        await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,principal_credit,interest_credit,overdue_credit,event_date,description) VALUES ($1,$2,'adjustment',$3,$4,$5,$6,$7)`,[customer.clientId,parent.rows[0].id,remaining.principal,remaining.interest,remaining.overdue,start,`Outstanding balance transferred to ${loan.loan_number}`]);
+        const child=await db.query(`UPDATE loans SET status='active',principal_amount=$3,interest_rate_percent=$4,custom_duration_days=$5,repayment_preference='maturity',start_date=$6,maturity_date=$7,terms_snapshot=terms_snapshot||$8::jsonb,updated_at=NOW() WHERE id=$1 AND client_id=$2 RETURNING id,loan_number,borrower_id`,[loanId,customer.clientId,principal,rate,offer.duration_days,start,maturity,JSON.stringify({...snapshot,rollover_accepted_on:start})]);
+        const schedule=await db.query(`INSERT INTO loan_schedules (client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES ($1,$2,1,$3,$4,$5) RETURNING id`,[customer.clientId,loanId,maturity,principal,interest]);
+        await db.query(`INSERT INTO collection_tasks (client_id,borrower_id,loan_id,schedule_id,due_date) VALUES ($1,$2,$3,$4,$5)`,[customer.clientId,child.rows[0].borrower_id,loanId,schedule.rows[0].id,maturity]);
+        await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,principal_debit,event_date,description) VALUES ($1,$2,'adjustment',$3,$4,'Custom loan rollover balance accepted')`,[customer.clientId,loanId,principal,start]);
+        await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,interest_debit,event_date,description) VALUES ($1,$2,'interest_accrued',$3,$4,'Flat interest for custom loan rollover term')`,[customer.clientId,loanId,interest,maturity]);
+      }else{
+        const acceptedOn=String((await db.query(`SELECT public.admin_ist_today()::text AS today`)).rows[0].today),maturityDate=new Date(`${acceptedOn}T00:00:00Z`);
+        maturityDate.setUTCDate(maturityDate.getUTCDate()+Number(offer.duration_days));const maturity=maturityDate.toISOString().slice(0,10);
+        const accepted=await db.query(`UPDATE loans SET status='approved',principal_amount=$3,interest_rate_percent=$4,custom_duration_days=$5,repayment_preference='maturity',start_date=$6,maturity_date=$7,terms_snapshot=terms_snapshot||$8::jsonb,updated_at=NOW() WHERE id=$1 AND client_id=$2 RETURNING borrower_id`,[loanId,customer.clientId,offer.principal_amount,offer.interest_rate_percent,offer.duration_days,acceptedOn,maturity,JSON.stringify({custom_offer:offer,request_type:'custom',repayment_preference:'maturity'})]);
+        const interest=Number((Number(offer.principal_amount)*Number(offer.interest_rate_percent)/100).toFixed(2));
+        const schedule=await db.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES($1,$2,1,$3,$4,$5) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[customer.clientId,loanId,maturity,offer.principal_amount,interest]);
+        if(schedule.rowCount)await db.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5)`,[customer.clientId,accepted.rows[0].borrower_id,loanId,schedule.rows[0].id,maturity]);
+      }
     }else{
       await db.query(`UPDATE loans SET status='cancelled',updated_at=NOW() WHERE id=$1 AND client_id=$2`,[loanId,customer.clientId]);
     }
@@ -223,14 +346,18 @@ mobilePortalRouter.patch('/borrowing/requests/:loanId/offer-response', asyncHand
 
 mobilePortalRouter.get('/borrowing/loans', asyncHandler(async (req, res) => {
   const customer = (req as CustomerRequest).customer;
+  const clientToday=await pool.query(`SELECT public.admin_ist_today()::text AS today`);
+  await ensureRegularInterestSchedules(customer.clientId,String(clientToday.rows[0].today));
   const access = await pool.query(`SELECT c.customer_type, 'borrow'=ANY(COALESCE(cl.enabled_modules,ARRAY['invest']::text[])) AS enabled
     FROM customers c JOIN clients cl ON cl.id=c.client_id WHERE c.id=$1 AND c.client_id=$2 AND c.status='active' AND cl.status='active'`, [customer.id, customer.clientId]);
   const borrower = await pool.query(`SELECT 1 FROM borrowers WHERE client_id=$1 AND customer_id=$2 AND status='active' LIMIT 1`, [customer.clientId, customer.id]);
   if (!access.rows[0]?.enabled || (!['borrower', 'both'].includes(access.rows[0]?.customer_type) && !borrower.rowCount)) { res.status(403).json({ error: 'Borrowing is not enabled for your account.' }); return; }
   const loans = await pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,
-      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.created_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,
-      lp.name AS product_name,lp.interest_model,lp.interest_rate_period,lp.repayment_model,
-      lp.repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
+      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.created_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,l.rollover_from_loan_id,
+      (SELECT ch.loan_number FROM loans ch WHERE ch.client_id=l.client_id AND ch.rollover_from_loan_id=l.id AND ch.status IN ('active','overdue','rolled_over','closed') ORDER BY ch.created_at DESC LIMIT 1) AS rollover_to_loan_number,
+      EXISTS(SELECT 1 FROM loans ch WHERE ch.client_id=l.client_id AND ch.rollover_from_loan_id=l.id AND ch.status IN ('pending_approval','pending_customer_acceptance','approved','active','overdue')) AS rollover_pending,
+      lp.name AS product_name,COALESCE(l.terms_snapshot->>'interest_model',lp.interest_model) AS interest_model,COALESCE(l.terms_snapshot->>'interest_rate_period',lp.interest_rate_period) AS interest_rate_period,COALESCE(l.terms_snapshot->>'repayment_model',lp.repayment_model) AS repayment_model,
+      COALESCE(l.terms_snapshot->>'repayment_frequency',lp.repayment_frequency) AS repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
     FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
     JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
     WHERE l.client_id=$1 AND b.customer_id=$2 ORDER BY l.created_at DESC LIMIT 250`, [customer.clientId, customer.id]);
@@ -263,12 +390,16 @@ mobilePortalRouter.get('/borrowing/loans', asyncHandler(async (req, res) => {
 
 mobilePortalRouter.get('/borrowing/loans/:loanId', asyncHandler(async (req, res) => {
   const customer = (req as CustomerRequest).customer;
+  const clientToday=await pool.query(`SELECT public.admin_ist_today()::text AS today`);
+  await ensureRegularInterestSchedules(customer.clientId,String(clientToday.rows[0].today));
   const loanId = text(req.params.loanId);
   if (!isUuid(loanId)) { res.status(404).json({ error: 'Loan not found.' }); return; }
   const loan = await pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,
-      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,
-      lp.name AS product_name,lp.interest_model,lp.interest_rate_period,lp.repayment_model,
-      lp.repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
+      l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,l.rollover_from_loan_id,
+      (SELECT ch.loan_number FROM loans ch WHERE ch.client_id=l.client_id AND ch.rollover_from_loan_id=l.id AND ch.status IN ('active','overdue','rolled_over','closed') ORDER BY ch.created_at DESC LIMIT 1) AS rollover_to_loan_number,
+      EXISTS(SELECT 1 FROM loans ch WHERE ch.client_id=l.client_id AND ch.rollover_from_loan_id=l.id AND ch.status IN ('pending_approval','pending_customer_acceptance','approved','active','overdue')) AS rollover_pending,
+      lp.name AS product_name,COALESCE(l.terms_snapshot->>'interest_model',lp.interest_model) AS interest_model,COALESCE(l.terms_snapshot->>'interest_rate_period',lp.interest_rate_period) AS interest_rate_period,COALESCE(l.terms_snapshot->>'repayment_model',lp.repayment_model) AS repayment_model,
+      COALESCE(l.terms_snapshot->>'repayment_frequency',lp.repayment_frequency) AS repayment_frequency,lp.grace_period_days,lp.required_documents,lp.receipt_required
     FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
     JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
     WHERE l.id=$1 AND l.client_id=$2 AND b.customer_id=$3`, [loanId, customer.clientId, customer.id]);

@@ -48,6 +48,7 @@ export function ClientCustomersPage() {
   const navigate = useNavigate();
   const { userId } = useParams();
   const [searchParams] = useSearchParams();
+  const allWorkspace = searchParams.get('workspace') === 'all';
   const [filter, setFilter] = useState<CustomerListFilter>('all');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -112,7 +113,7 @@ export function ClientCustomersPage() {
     <>
       <AppHeader
         title="Customers"
-        subtitle="Manage your Indian investor base"
+        subtitle={allWorkspace ? 'Manage customers across Investment and Borrowing.' : 'Manage your Indian investor base'}
         onOpenMenu={onOpenMenu}
         actions={
           <button type="button" className="primary-btn" onClick={() => setCreateOpen(true)}>
@@ -215,7 +216,7 @@ export function ClientCustomersPage() {
         ) : customers.length === 0 ? (
           <EmptyState
             title="No customers found"
-            message="No matching investor profiles in the database for this filter."
+            message={allWorkspace ? 'No customer profiles match the current filters.' : 'No matching investor profiles in the database for this filter.'}
           />
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -224,6 +225,7 @@ export function ClientCustomersPage() {
                 <tr>
                   <th>CUSTOMER ID</th>
                   <th>FULL NAME</th>
+                  {allWorkspace ? <th>SOURCE</th> : null}
                   <th>MOBILE</th>
                   <th>EMAIL</th>
                   <th>PAN</th>
@@ -234,9 +236,10 @@ export function ClientCustomersPage() {
               </thead>
               <tbody>
                 {customers.map((row) => (
-                  <tr key={row.id} onClick={() => navigate(`/customers/${row.id}`)}>
+                  <tr key={row.id} onClick={() => navigate(`/customers/${row.id}${allWorkspace ? '?workspace=all' : ''}`)}>
                     <td>{displayCustomerId(row.customerCode)}</td>
                     <td>{row.fullName}</td>
+                    {allWorkspace ? <td><span className={`activity-source ${row.customerType === 'borrower' ? 'borrowing' : 'investment'}`}>{row.customerType === 'both' ? 'Investment + Borrowing' : row.customerType === 'borrower' ? 'Borrowing' : 'Investment'}</span></td> : null}
                     <td>{formatMobile(row.mobileNumber)}</td>
                     <td>{row.emailAddress}</td>
                     <td>{maskPan(row.panNumber)}</td>
@@ -268,8 +271,8 @@ export function ClientCustomersPage() {
         <ClientCustomerDetailsModal
           customerId={userId}
           neighbors={customers}
-          onClose={() => navigate('/customers')}
-          onNavigate={(id) => navigate(`/customers/${id}`)}
+          onClose={() => navigate(`/customers${allWorkspace ? '?workspace=all' : ''}`)}
+          onNavigate={(id) => navigate(`/customers/${id}${allWorkspace ? '?workspace=all' : ''}`)}
           onChanged={() => void load()}
         />
       ) : null}

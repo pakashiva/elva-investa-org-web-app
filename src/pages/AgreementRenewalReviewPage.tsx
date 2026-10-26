@@ -1,6 +1,6 @@
 import { FileDown } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AgreementDetailsModal } from '../components/AgreementDetailsModal';
 import { AppHeader } from '../components/AppHeader';
 import { DecisionResultModal } from '../components/DecisionResultModal';
@@ -37,6 +37,8 @@ export function AgreementRenewalReviewPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
   const { renewalId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestQueuePath = `/investment-requests${new URLSearchParams(location.search).get('workspace') === 'all' ? '?workspace=all' : ''}`;
   const [detail, setDetail] = useState<AgreementRenewalDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -229,7 +231,7 @@ export function AgreementRenewalReviewPage() {
           <button
             type="button"
             className="ghost-btn"
-            onClick={() => navigate('/investment-requests')}
+            onClick={() => navigate(requestQueuePath)}
           >
             Back to list
           </button>
@@ -437,7 +439,7 @@ export function AgreementRenewalReviewPage() {
           requestId={detail.agreement_id}
           amount={detail.new_principal}
           subject="renewal"
-          onClose={() => navigate('/investment-requests')}
+          onClose={() => navigate(requestQueuePath)}
         />
       ) : null}
     </>

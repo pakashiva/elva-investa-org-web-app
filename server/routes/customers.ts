@@ -22,6 +22,7 @@ function mapCustomerList(row: Record<string, unknown>) {
     pendingInvestments: Number(row.pending_investments ?? 0),
     closedInvestments: Number(row.closed_investments ?? 0),
     totalInvested: money(row.total_invested),
+    customerType: String(row.customer_type ?? 'investor'),
   };
 }
 
@@ -86,7 +87,7 @@ customersRouter.get(
       `SELECT
          c.id, c.customer_code, c.full_name, c.mobile_number, c.email_address,
          c.date_of_birth, c.address, c.city, c.state, c.pin_code, c.status,
-         c.referral_code, c.created_at, k.pan_number,
+         c.referral_code, c.created_at, c.customer_type, k.pan_number,
          (SELECT COUNT(*)::int FROM investments i
            WHERE i.customer_id = c.id AND i.client_id = c.client_id AND i.status = 'Active') AS active_investments,
          (SELECT COUNT(*)::int FROM investments i

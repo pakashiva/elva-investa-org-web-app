@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { MoreVertical, Search } from 'lucide-react';
 import { AddInvestmentModal } from '../components/AddInvestmentModal';
 import { AgreementDetailsModal } from '../components/AgreementDetailsModal';
@@ -43,6 +43,8 @@ function isApprovedStatus(status: InvestmentRequestListRow['status']) {
 export function InvestmentRequestsPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const workspaceSuffix = new URLSearchParams(location.search).get('workspace') === 'all' ? '?workspace=all' : '';
   const [notice, setNotice] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -298,7 +300,7 @@ export function InvestmentRequestsPage() {
                                   role="menuitem"
                                   onClick={() => {
                                     setMenuId(null);
-                                    navigate(`/investment-requests/${row.id}`);
+                                    navigate(`/investment-requests/${row.id}${workspaceSuffix}`);
                                   }}
                                 >
                                   View
@@ -313,8 +315,8 @@ export function InvestmentRequestsPage() {
                             onClick={() =>
                               navigate(
                                 isRenewal
-                                  ? `/investment-requests/renewal/${row.id}`
-                                  : `/investment-requests/${row.id}`
+                                  ? `/investment-requests/renewal/${row.id}${workspaceSuffix}`
+                                  : `/investment-requests/${row.id}${workspaceSuffix}`
                               )
                             }
                           >

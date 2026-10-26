@@ -1,6 +1,6 @@
 import { ArrowLeft, FileDown } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { AgreementDetailsModal } from '../components/AgreementDetailsModal';
 import { AppHeader } from '../components/AppHeader';
 import { DecisionResultModal } from '../components/DecisionResultModal';
@@ -42,6 +42,8 @@ export function InvestmentReviewPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
   const { requestId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestQueuePath = `/investment-requests${new URLSearchParams(location.search).get('workspace') === 'all' ? '?workspace=all' : ''}`;
   const [detail, setDetail] = useState<InvestmentRequestDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -498,7 +500,7 @@ export function InvestmentReviewPage() {
           action={decision}
           requestId={detail.request_id}
           amount={detail.fund_amount}
-          onClose={() => navigate('/investment-requests')}
+          onClose={() => navigate(requestQueuePath)}
         />
       ) : null}
     </>

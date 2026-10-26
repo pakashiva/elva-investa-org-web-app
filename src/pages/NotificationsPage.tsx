@@ -1,6 +1,6 @@
 import { useState, type MouseEvent } from 'react';
 import { ArrowDownLeft, Calendar, HandCoins, Plus, Search, UserPlus } from 'lucide-react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { ErrorBanner } from '../components/States';
 import { useNotifications } from '../hooks/useNotifications';
@@ -27,6 +27,8 @@ const FILTERS: { id: NotificationFilter; label: string }[] = [
 export function NotificationsPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const allWorkspace = new URLSearchParams(location.search).get('workspace') === 'all';
   const notices = useNotifications();
   const [dateOpen, setDateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -157,7 +159,7 @@ export function NotificationsPage() {
           <ul className="notice-list">
             {notices.rows.map((row) => (
               <li key={row.key}>
-                <button type="button" className="notice-item" onClick={() => navigate(row.href)}>
+                <button type="button" className="notice-item" onClick={() => navigate(allWorkspace ? `${row.href}${row.href.includes('?') ? '&' : '?'}workspace=all` : row.href)}>
                   <span className={`notice-icon ${row.kind}`}>
                     {row.kind === 'investment' ? (
                       <Plus size={16} />

@@ -27,7 +27,7 @@ export function notificationTitle(row: AdminNotification): string {
   if (row.kind === 'loan') {
     if (row.plan_name === 'Custom offer accepted') return `Custom loan offer accepted by ${row.customer_name}`;
     if (row.plan_name === 'Custom offer declined') return `Custom loan offer declined by ${row.customer_name}`;
-    return `Loan request awaiting review from ${row.customer_name} - ${formatInr(row.amount ?? 0)}`;
+    return `${row.plan_name || 'Loan request'} awaiting review from ${row.customer_name} - ${formatInr(row.amount ?? 0)}`;
   }
   if (row.kind === 'investment') {
     return `New investment request from ${row.customer_name} - ${formatInr(row.amount ?? 0)} in ${row.plan_name || 'New Fund Request'}`;
@@ -42,7 +42,7 @@ export function notificationBody(row: AdminNotification): string {
   if (row.kind === 'loan') {
     if (row.plan_name === 'Custom offer accepted') return 'The customer accepted your offer. Record the loan disbursement in Borrowing.';
     if (row.plan_name === 'Custom offer declined') return 'The customer declined the offer. They can submit a new loan request.';
-    return 'Review the borrower request in the Borrowing workspace.';
+    return `Review this ${row.plan_name || 'loan request'} in the Borrowing workspace.`;
   }
   if (row.kind === 'investment') {
     return 'Review and approve the request to proceed with allocation.';

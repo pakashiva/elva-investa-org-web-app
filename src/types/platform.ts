@@ -207,6 +207,7 @@ export type CustomerListItem = {
   pendingInvestments?: number;
   closedInvestments?: number;
   totalInvested?: number;
+  customerType?: 'investor' | 'borrower' | 'both' | string;
 };
 
 export type CustomerBank = {

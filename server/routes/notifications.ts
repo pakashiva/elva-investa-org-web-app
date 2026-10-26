@@ -95,12 +95,13 @@ notificationsRouter.get(
            'loan',
            c.full_name,
            l.principal_amount,
-           l.loan_number,
+           (CASE WHEN l.rollover_from_loan_id IS NOT NULL THEN 'Custom loan rollover' WHEN l.request_type='custom' THEN 'Custom loan' WHEN l.request_type='regular' THEN 'Regular loan' WHEN l.request_type='daily' THEN 'Daily collection loan' ELSE lp.name END) || ' · ' || l.loan_number,
            l.created_at,
            '/borrowing/loans'
          FROM loans l
          JOIN borrowers b ON b.id = l.borrower_id AND b.client_id = l.client_id
          JOIN customers c ON c.id = b.customer_id AND c.client_id = b.client_id
+         JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
          WHERE l.client_id = $1 AND l.status = 'pending_approval'
 
          UNION ALL

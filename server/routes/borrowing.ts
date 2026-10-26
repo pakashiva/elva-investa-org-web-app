@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler, requireAuth, requireClientAdmin } from '../middleware';
 import { pool } from '../db';
+import { ensureRegularInterestSchedules } from '../regularLoanSchedules';
 import type { AuthedRequest } from '../types';
 
 export const borrowingRouter = Router();
@@ -34,6 +35,42 @@ borrowingRouter.use(asyncHandler(async (req, res, next) => {
 
 borrowingRouter.get('/overview', asyncHandler(async (req, res) => {
   const tenant = clientId(req);
+  const clientToday=await pool.query(`SELECT public.admin_ist_today()::text AS today`);
+  const undatedApproved=await pool.query(`SELECT l.id,l.borrower_id,l.request_type,l.principal_amount,l.interest_rate_percent,l.custom_duration_days,l.terms_snapshot,
+      COALESCE(l.start_date,(l.updated_at AT TIME ZONE 'Asia/Kolkata')::date)::text AS approval_date
+    FROM loans l WHERE l.client_id=$1 AND l.status='approved' AND l.request_type IN ('daily','regular','custom')
+      AND NOT EXISTS(SELECT 1 FROM loan_schedules s WHERE s.client_id=l.client_id AND s.loan_id=l.id)`,[tenant]);
+  for(const loan of undatedApproved.rows){
+    const start=String(loan.approval_date||clientToday.rows[0]?.today),startDate=new Date(`${start}T00:00:00Z`);
+    if(Number.isNaN(startDate.getTime()))continue;
+    if(loan.request_type==='daily'){
+      const days=Number(loan.terms_snapshot?.collection_days??loan.custom_duration_days),face=Number(loan.principal_amount);
+      if(!Number.isInteger(days)||days<1||days>3650)continue;
+      for(let day=1;day<=days;day++){
+        const due=new Date(startDate);due.setUTCDate(due.getUTCDate()+day);const dueDate=due.toISOString().slice(0,10);
+        const amount=Number((day===days?face-Number((face/days).toFixed(2))*(days-1):face/days).toFixed(2));
+        const saved=await pool.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due) VALUES($1,$2,$3,$4,$5) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,loan.id,day,dueDate,amount]);
+        if(saved.rowCount)await pool.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[tenant,loan.borrower_id,loan.id,saved.rows[0].id,dueDate]);
+      }
+      const maturity=new Date(startDate);maturity.setUTCDate(maturity.getUTCDate()+days);
+      await pool.query(`UPDATE loans SET start_date=COALESCE(start_date,$3),maturity_date=COALESCE(maturity_date,$4) WHERE id=$1 AND client_id=$2`,[tenant,loan.id,start,maturity.toISOString().slice(0,10)]);
+    }else if(loan.request_type==='regular'){
+      const due=new Date(startDate),day=due.getUTCDate();due.setUTCDate(1);due.setUTCMonth(due.getUTCMonth()+1);due.setUTCDate(Math.min(day,new Date(Date.UTC(due.getUTCFullYear(),due.getUTCMonth()+1,0)).getUTCDate()));
+      const dueDate=due.toISOString().slice(0,10),interest=Number((Number(loan.principal_amount)*Number(loan.interest_rate_percent)/100).toFixed(2));
+      const saved=await pool.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES($1,$2,1,$3,0,$4) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,loan.id,dueDate,interest]);
+      if(saved.rowCount)await pool.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[tenant,loan.borrower_id,loan.id,saved.rows[0].id,dueDate]);
+      await pool.query(`UPDATE loans SET start_date=COALESCE(start_date,$3) WHERE id=$1 AND client_id=$2`,[tenant,loan.id,start]);
+    }else{
+      const days=Number(loan.custom_duration_days),rate=Number(loan.interest_rate_percent);
+      if(!Number.isInteger(days)||days<1||days>3650||!Number.isFinite(rate))continue;
+      const due=new Date(startDate);due.setUTCDate(due.getUTCDate()+days);const dueDate=due.toISOString().slice(0,10),interest=Number((Number(loan.principal_amount)*rate/100).toFixed(2));
+      const saved=await pool.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES($1,$2,1,$3,$4,$5) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,loan.id,dueDate,loan.principal_amount,interest]);
+      if(saved.rowCount)await pool.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[tenant,loan.borrower_id,loan.id,saved.rows[0].id,dueDate]);
+      await pool.query(`UPDATE loans SET start_date=COALESCE(start_date,$3),maturity_date=COALESCE(maturity_date,$4) WHERE id=$1 AND client_id=$2`,[tenant,loan.id,start,dueDate]);
+    }
+  }
+  const regularScheduleHorizon=await pool.query(`SELECT (public.admin_ist_today()+INTERVAL '1 month')::date::text AS through_date`);
+  await ensureRegularInterestSchedules(tenant,String(regularScheduleHorizon.rows[0]?.through_date));
   await pool.query(`UPDATE loan_schedules s SET status='overdue',
       overdue_charge=CASE COALESCE(l.terms_snapshot->>'overdue_rule',lp.overdue_rule)
         WHEN 'fixed_charge' THEN COALESCE(NULLIF(l.terms_snapshot->>'overdue_charge','')::numeric,lp.overdue_charge)
@@ -65,17 +102,19 @@ borrowingRouter.get('/overview', asyncHandler(async (req, res) => {
         )<public.admin_ist_today() AND s.status NOT IN ('paid','waived')) AS overdue_total,
       (SELECT COALESCE(SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)),0)
         FROM loans l JOIN loan_schedules s ON s.loan_id=l.id AND s.client_id=l.client_id
-        WHERE l.client_id=$1 AND l.status IN ('active','overdue') AND s.status NOT IN ('paid','waived')) AS outstanding`, [tenant]),
+        WHERE l.client_id=$1 AND l.status IN ('active','overdue') AND s.status NOT IN ('paid','waived')) +
+      (SELECT COALESCE(SUM(GREATEST(bal.principal,0)),0) FROM loans rl CROSS JOIN LATERAL (SELECT COALESCE(SUM(principal_debit-principal_credit),0) principal FROM loan_ledger WHERE loan_id=rl.id AND client_id=rl.client_id) bal WHERE rl.client_id=$1 AND rl.request_type='regular' AND rl.status IN ('active','overdue')) AS outstanding`, [tenant]),
     pool.query(`SELECT b.id, c.full_name AS name, c.customer_code AS code, c.mobile_number AS mobile,
       b.status, b.created_at, COUNT(l.id)::int AS loan_count
       FROM borrowers b JOIN customers c ON c.id=b.customer_id AND c.client_id=b.client_id
       LEFT JOIN loans l ON l.borrower_id=b.id AND l.client_id=b.client_id
       WHERE b.client_id=$1 GROUP BY b.id,c.id ORDER BY b.created_at DESC LIMIT 250`, [tenant]),
-    pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,l.start_date,l.maturity_date,l.created_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,
+    pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,l.start_date,l.maturity_date,l.created_at,l.request_type,l.custom_duration_days,l.repayment_preference,l.counter_offer,l.rollover_from_loan_id,l.terms_snapshot,
+      (SELECT COALESCE(SUM(GREATEST(ps.principal_due+ps.interest_due+ps.overdue_charge-ps.amount_paid,0)),0) FROM loan_schedules ps WHERE ps.client_id=l.client_id AND ps.loan_id=l.rollover_from_loan_id AND ps.status NOT IN ('paid','waived')) AS rollover_balance,
       l.terms_snapshot->>'borrower_notes' AS borrower_notes,l.terms_snapshot->>'purpose' AS borrower_purpose,
       NULLIF(l.terms_snapshot->>'requested_interest_rate_percent','')::numeric AS requested_interest_rate_percent,
       c.full_name AS borrower_name,c.customer_code AS borrower_code,lp.name AS product_name,lp.write_off_allowed,lp.closure_mode,
-      COALESCE((SELECT SUM(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid) FROM loan_schedules s WHERE s.loan_id=l.id AND s.client_id=l.client_id AND s.status <> 'waived'),0) AS balance
+      CASE WHEN l.request_type='regular' THEN COALESCE((SELECT SUM(principal_debit-principal_credit) FROM loan_ledger ll WHERE ll.loan_id=l.id AND ll.client_id=l.client_id),0)+COALESCE((SELECT SUM(GREATEST(s.interest_due+s.overdue_charge-s.amount_paid,0)) FROM loan_schedules s WHERE s.loan_id=l.id AND s.client_id=l.client_id AND s.status <> 'waived'),0) ELSE COALESCE((SELECT SUM(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid) FROM loan_schedules s WHERE s.loan_id=l.id AND s.client_id=l.client_id AND s.status <> 'waived'),0) END AS balance
       FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
       JOIN customers c ON c.id=b.customer_id AND c.client_id=b.client_id
       JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
@@ -83,13 +122,16 @@ borrowingRouter.get('/overview', asyncHandler(async (req, res) => {
     pool.query(`SELECT id,name,interest_model,interest_rate_percent,interest_rate_period,interest_frequency,repayment_model,repayment_frequency,approval_workflow,
       payment_allocation,grace_period_days,overdue_rule,overdue_charge,part_payments_allowed,advance_payment_treatment,receipt_required,write_off_allowed,closure_mode,rounding_scale,required_documents
       FROM loan_products WHERE client_id=$1 AND status='active' ORDER BY created_at`, [tenant]),
-    pool.query(`SELECT t.id,t.due_date,s.status,l.loan_number,c.full_name AS borrower_name,c.customer_code AS borrower_code,
+    pool.query(`SELECT t.id,t.due_date,s.status,l.loan_number,
+      CASE WHEN l.request_type='daily' THEN 'Daily collection loan' WHEN l.request_type='regular' THEN 'Regular loan · monthly interest' WHEN l.request_type='custom' THEN 'Custom loan' ELSE lp.name END AS loan_type,
+      c.full_name AS borrower_name,c.customer_code AS borrower_code,
       GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0) AS due_amount
       FROM collection_tasks t JOIN loans l ON l.id=t.loan_id AND l.client_id=t.client_id
+      JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
       JOIN borrowers b ON b.id=t.borrower_id AND b.client_id=t.client_id
       JOIN customers c ON c.id=b.customer_id AND c.client_id=b.client_id
       LEFT JOIN loan_schedules s ON s.id=t.schedule_id AND s.client_id=t.client_id
-      WHERE t.client_id=$1 AND t.due_date<=public.admin_ist_today() AND t.status='pending' AND l.status IN ('active','overdue') AND s.status NOT IN ('paid','waived') ORDER BY t.due_date,c.full_name`, [tenant]),
+      WHERE t.client_id=$1 AND t.due_date<=public.admin_ist_today() AND t.status='pending' AND l.status IN ('approved','active','overdue') AND s.status NOT IN ('paid','waived') ORDER BY t.due_date,c.full_name`, [tenant]),
     pool.query(`SELECT c.id,c.full_name,c.customer_code,c.mobile_number FROM customers c
       WHERE c.client_id=$1 AND c.status='active'
         AND NOT EXISTS (SELECT 1 FROM borrowers b WHERE b.client_id=c.client_id AND b.customer_id=c.id)
@@ -116,9 +158,9 @@ borrowingRouter.get('/reports/collections.csv', asyncHandler(async (req,res)=>{
 borrowingRouter.get('/loans/:loanId', asyncHandler(async (req, res) => {
   const tenant=clientId(req), id=value(req.params.loanId);
   const [loan,schedule,ledger,payments]=await Promise.all([
-    pool.query(`SELECT l.id,l.loan_number,l.status,l.principal_amount,l.interest_rate_percent,l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.close_reason,
+    pool.query(`SELECT l.id,l.loan_number,l.status,l.request_type,l.principal_amount,l.interest_rate_percent,l.terms_snapshot,l.start_date,l.maturity_date,l.disbursed_at,l.closed_at,l.close_reason,
       c.full_name borrower_name,c.customer_code borrower_code,c.mobile_number,k.aadhaar_number,k.pan_number,lp.name product_name,lp.receipt_required,lp.required_documents,
-      COALESCE((SELECT SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)) FROM loan_schedules s WHERE s.loan_id=l.id AND s.client_id=l.client_id AND s.status NOT IN ('waived')),0) balance
+      CASE WHEN l.request_type='regular' THEN COALESCE((SELECT SUM(principal_debit-principal_credit) FROM loan_ledger ll WHERE ll.loan_id=l.id AND ll.client_id=l.client_id),0)+COALESCE((SELECT SUM(GREATEST(s.interest_due+s.overdue_charge-s.amount_paid,0)) FROM loan_schedules s WHERE s.loan_id=l.id AND s.client_id=l.client_id AND s.status NOT IN ('waived')),0) ELSE COALESCE((SELECT SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)) FROM loan_schedules s WHERE s.loan_id=l.id AND s.client_id=l.client_id AND s.status NOT IN ('waived')),0) END balance
       FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id JOIN customers c ON c.id=b.customer_id AND c.client_id=b.client_id
       JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id LEFT JOIN kyc_documents k ON k.customer_id=c.id AND k.client_id=c.client_id WHERE l.id=$1 AND l.client_id=$2`,[id,tenant]),
     pool.query(`SELECT id,installment_number,due_date,principal_due,interest_due,overdue_charge,amount_paid,status FROM loan_schedules WHERE loan_id=$1 AND client_id=$2 ORDER BY installment_number`,[id,tenant]),
@@ -132,7 +174,7 @@ borrowingRouter.get('/loans/:loanId', asyncHandler(async (req, res) => {
 borrowingRouter.get('/reports/loans.csv', asyncHandler(async(req,res)=>{
   const tenant=clientId(req);
   const result=await pool.query(`SELECT l.loan_number,c.full_name,c.customer_code,lp.name product_name,l.status,l.principal_amount,
-    COALESCE(SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)) FILTER(WHERE s.status NOT IN ('waived')),0) balance,
+    CASE WHEN l.request_type='regular' THEN COALESCE((SELECT SUM(principal_debit-principal_credit) FROM loan_ledger ll WHERE ll.loan_id=l.id AND ll.client_id=l.client_id),0)+COALESCE(SUM(GREATEST(s.interest_due+s.overdue_charge-s.amount_paid,0)) FILTER(WHERE s.status NOT IN ('waived')),0) ELSE COALESCE(SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)) FILTER(WHERE s.status NOT IN ('waived')),0) END balance,
     l.start_date,l.maturity_date FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id
     JOIN customers c ON c.id=b.customer_id AND c.client_id=b.client_id JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id
     LEFT JOIN loan_schedules s ON s.loan_id=l.id AND s.client_id=l.client_id WHERE l.client_id=$1
@@ -212,10 +254,38 @@ borrowingRouter.patch('/loans/:loanId/decision', asyncHandler(async (req,res) =>
   if (decision !== 'approve' && decision !== 'reject') { res.status(400).json({error:'Decision must be approve or reject.'});return; }
   const db=await pool.connect(); let owner, decisionResult;
   try { await db.query('BEGIN');
-  const current=await db.query(`SELECT l.*,b.customer_id,lp.* FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id WHERE l.id=$1 AND l.client_id=$2 AND l.status='pending_approval' AND l.request_type='standard' FOR UPDATE OF l`,[id,tenant]);
+  const current=await db.query(`SELECT l.*,b.customer_id,lp.* FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id WHERE l.id=$1 AND l.client_id=$2 AND l.status='pending_approval' AND l.request_type IN ('standard','regular','daily') FOR UPDATE OF l`,[id,tenant]);
   if (!current.rowCount) { await db.query('ROLLBACK');res.status(409).json({error:'This loan is not awaiting approval.'});return; }
   const loan=current.rows[0], terms={...loan.terms_snapshot};
+  const approvalDayResult=await db.query(`SELECT public.admin_ist_today()::text AS today`),approvalDate=String(approvalDayResult.rows[0]?.today);
   if(decision==='approve') {
+    if(loan.request_type==='daily') {
+      const rate=Number(req.body?.terms?.interest_rate_percent??terms.interest_rate_percent),months=Number(req.body?.terms?.interest_duration_months??terms.interest_duration_months),days=Number(req.body?.terms?.collection_days??terms.collection_days);
+      if(!Number.isFinite(rate)||rate<0||rate>100||!Number.isInteger(months)||months<1||months>600||!Number.isInteger(days)||days<1||days>3650){await db.query('ROLLBACK');res.status(400).json({error:'Enter a valid monthly rate, interest duration, and collection term.'});return;}
+      const upfrontPercent=rate*months;if(upfrontPercent>=100){await db.query('ROLLBACK');res.status(400).json({error:'The total upfront interest must be less than the requested amount.'});return;}
+      terms.interest_rate_percent=rate;terms.interest_model='flat';terms.interest_rate_period='monthly';terms.interest_duration_months=months;terms.collection_days=days;terms.repayment_model='daily_collection';terms.repayment_frequency='daily';terms.upfront_interest_amount=Number((Number(loan.principal_amount)*upfrontPercent/100).toFixed(2));terms.net_disbursement_amount=Number((Number(loan.principal_amount)-Number(terms.upfront_interest_amount)).toFixed(2));
+      terms.overdue_rule=String(req.body?.terms?.overdue_rule??terms.overdue_rule);terms.overdue_charge=Number(req.body?.terms?.overdue_charge??terms.overdue_charge);terms.grace_period_days=Number(req.body?.terms?.grace_period_days??terms.grace_period_days);
+      if(!['status_only','percentage_charge','fixed_charge'].includes(terms.overdue_rule)||!Number.isFinite(terms.overdue_charge)||terms.overdue_charge<0||!Number.isInteger(terms.grace_period_days)||terms.grace_period_days<0){await db.query('ROLLBACK');res.status(400).json({error:'Enter valid overdue treatment settings.'});return;}
+      const approvalStart=new Date(`${approvalDate}T00:00:00Z`);
+      for(let day=1;day<=days;day++){
+        const due=new Date(approvalStart);due.setUTCDate(due.getUTCDate()+day);const dueDate=due.toISOString().slice(0,10);
+        const face=Number(loan.principal_amount),amount=Number((day===days?face-Number((face/days).toFixed(2))*(days-1):face/days).toFixed(2));
+        const saved=await db.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due) VALUES($1,$2,$3,$4,$5) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,id,day,dueDate,amount]);
+        if(saved.rowCount)await db.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5)`,[tenant,loan.borrower_id,id,saved.rows[0].id,dueDate]);
+      }
+      const maturity=new Date(approvalStart);maturity.setUTCDate(maturity.getUTCDate()+days);
+      await db.query(`UPDATE loans SET status='approved',interest_rate_percent=$3,custom_duration_days=$4,start_date=$5,maturity_date=$6,terms_snapshot=$7::jsonb,approved_by=$8,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[id,tenant,rate,days,approvalDate,maturity.toISOString().slice(0,10),JSON.stringify(terms),(req as AuthedRequest).auth.id]);
+    } else if(loan.request_type==='regular') {
+      const requested=Number(terms.requested_interest_rate_percent);
+      const rawRate=req.body?.terms?.interest_rate_percent===undefined?requested:Number(req.body.terms.interest_rate_percent);
+      if(!Number.isFinite(rawRate)||rawRate<0||rawRate>100){await db.query('ROLLBACK');res.status(400).json({error:'Interest rate must be between 0 and 100 percent.'});return;}
+      terms.interest_rate_percent=rawRate;terms.interest_model='simple';terms.interest_rate_period='monthly';terms.interest_frequency='monthly';terms.repayment_model='interest_only';terms.repayment_frequency='monthly';terms.payment_allocation='interest_first';terms.part_payments_allowed=true;terms.has_fixed_term=false;
+      const due=new Date(`${approvalDate}T00:00:00Z`),day=due.getUTCDate();due.setUTCDate(1);due.setUTCMonth(due.getUTCMonth()+1);due.setUTCDate(Math.min(day,new Date(Date.UTC(due.getUTCFullYear(),due.getUTCMonth()+1,0)).getUTCDate()));
+      const dueDate=due.toISOString().slice(0,10),interest=Number((Number(loan.principal_amount)*rawRate/100).toFixed(2));
+      const saved=await db.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES($1,$2,1,$3,0,$4) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,id,dueDate,interest]);
+      if(saved.rowCount)await db.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5)`,[tenant,loan.borrower_id,id,saved.rows[0].id,dueDate]);
+      await db.query(`UPDATE loans SET status='approved',interest_rate_percent=$3,start_date=$4,terms_snapshot=$5::jsonb,approved_by=$6,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[id,tenant,rawRate,approvalDate,JSON.stringify(terms),(req as AuthedRequest).auth.id]);
+    } else {
     const allowed=['interest_model','interest_rate_percent','interest_rate_period','interest_frequency','repayment_frequency','grace_period_days','overdue_rule','overdue_charge'];
     for(const key of allowed) if(req.body?.terms?.[key]!==undefined) terms[key]=req.body.terms[key];
     if(!['simple','flat','reducing_balance'].includes(terms.interest_model)||!['daily','weekly','monthly','annual'].includes(terms.interest_rate_period)||!['daily','weekly','monthly','quarterly','at_maturity'].includes(terms.interest_frequency)||!['weekly','monthly','quarterly','at_maturity'].includes(terms.repayment_frequency)||!['status_only','percentage_charge','fixed_charge'].includes(terms.overdue_rule)) { await db.query('ROLLBACK');res.status(400).json({error:'Choose valid loan approval terms.'});return; }
@@ -224,10 +294,24 @@ borrowingRouter.patch('/loans/:loanId/decision', asyncHandler(async (req,res) =>
     const term=Math.max(1,Number(loan.terms_snapshot?.installments)||1),principal=Number(loan.principal_amount),scheduleCount=terms.repayment_frequency==='at_maturity'?1:term;
     const periodRate=(rate/100)/(terms.interest_rate_period==='annual'?12:terms.interest_rate_period==='monthly'?1:terms.interest_rate_period==='weekly'?4.345:30.437)*(terms.repayment_frequency==='quarterly'?3:terms.repayment_frequency==='weekly'?0.23:1);
     const payment=terms.repayment_model==='principal_and_interest'&&periodRate>0&&terms.interest_model==='reducing_balance'?principal*periodRate/(1-Math.pow(1+periodRate,-term)):principal/term+(terms.repayment_model==='principal_and_interest'?principal*periodRate:0); let balance=principal;
-    await db.query(`DELETE FROM collection_tasks WHERE client_id=$1 AND loan_id=$2`,[tenant,id]);
-    await db.query(`DELETE FROM loan_schedules WHERE client_id=$1 AND loan_id=$2`,[tenant,id]);
-    for(let i=1;i<=scheduleCount;i++){const due=new Date(`${loan.start_date}T00:00:00Z`);if(terms.repayment_frequency==='at_maturity')due.setUTCMonth(due.getUTCMonth()+term);else if(terms.repayment_frequency==='weekly')due.setUTCDate(due.getUTCDate()+7*i);else due.setUTCMonth(due.getUTCMonth()+(terms.repayment_frequency==='quarterly'?3*i:i));const basis=terms.interest_model==='reducing_balance'?balance:principal;let pd=0,interest=0;if(terms.repayment_model==='bullet'){pd=i===scheduleCount?balance:0;interest=basis*periodRate*(terms.repayment_frequency==='at_maturity'?term:1);}else if(terms.repayment_model==='interest_only'){pd=i===scheduleCount?balance:0;interest=basis*periodRate*(terms.repayment_frequency==='at_maturity'?term:1);}else{interest=basis*periodRate*(terms.repayment_frequency==='at_maturity'?term:1);pd=Math.min(balance,payment-interest);if(i===scheduleCount)pd=balance;}balance=Math.max(0,balance-pd);const dueDate=due.toISOString().slice(0,10);const inserted=await db.query(`INSERT INTO loan_schedules (client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,[tenant,id,i,dueDate,pd.toFixed(2),interest.toFixed(2)]);await db.query(`INSERT INTO collection_tasks (client_id,borrower_id,loan_id,schedule_id,due_date) VALUES ($1,$2,$3,$4,$5)`,[tenant,loan.borrower_id,id,inserted.rows[0].id,dueDate]);}
-    await db.query(`UPDATE loans SET status='approved',interest_rate_percent=$3,terms_snapshot=$4::jsonb,approved_by=$5,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[id,tenant,rate,JSON.stringify(terms),(req as AuthedRequest).auth.id]);
+    for(let i=1;i<=scheduleCount;i++){
+      const due=new Date(`${approvalDate}T00:00:00Z`);
+      if(terms.repayment_frequency==='at_maturity')due.setUTCMonth(due.getUTCMonth()+term);
+      else if(terms.repayment_frequency==='weekly')due.setUTCDate(due.getUTCDate()+7*i);
+      else due.setUTCMonth(due.getUTCMonth()+(terms.repayment_frequency==='quarterly'?3*i:i));
+      const basis=terms.interest_model==='reducing_balance'?balance:principal;let pd=0,interest=0;
+      if(terms.repayment_model==='bullet'){pd=i===scheduleCount?balance:0;interest=basis*periodRate*(terms.repayment_frequency==='at_maturity'?term:1);}
+      else if(terms.repayment_model==='interest_only'){pd=i===scheduleCount?balance:0;interest=basis*periodRate*(terms.repayment_frequency==='at_maturity'?term:1);}
+      else{interest=basis*periodRate*(terms.repayment_frequency==='at_maturity'?term:1);pd=Math.min(balance,payment-interest);if(i===scheduleCount)pd=balance;}
+      balance=Math.max(0,balance-pd);const dueDate=due.toISOString().slice(0,10);
+      const saved=await db.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES($1,$2,$3,$4,$5,$6)
+        ON CONFLICT(loan_id,installment_number) DO UPDATE SET due_date=EXCLUDED.due_date,principal_due=EXCLUDED.principal_due,interest_due=EXCLUDED.interest_due RETURNING id`,[tenant,id,i,dueDate,pd.toFixed(2),interest.toFixed(2)]);
+      const scheduleId=saved.rows[0].id;
+      const updatedTask=await db.query(`UPDATE collection_tasks SET due_date=$4,status='pending' WHERE client_id=$1 AND loan_id=$2 AND schedule_id=$3 RETURNING id`,[tenant,id,scheduleId,dueDate]);
+      if(!updatedTask.rowCount)await db.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5)`,[tenant,loan.borrower_id,id,scheduleId,dueDate]);
+    }
+    await db.query(`UPDATE loans SET status='approved',interest_rate_percent=$3,start_date=$4,terms_snapshot=$5::jsonb,approved_by=$6,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[id,tenant,rate,approvalDate,JSON.stringify(terms),(req as AuthedRequest).auth.id]);
+    }
   } else await db.query(`UPDATE loans SET status='rejected',approved_by=$3,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[id,tenant,(req as AuthedRequest).auth.id]);
   decisionResult=await db.query(`SELECT id,loan_number,status FROM loans WHERE id=$1 AND client_id=$2`,[id,tenant]);
   await db.query(`INSERT INTO loan_audit_logs (client_id,actor_id,entity_type,entity_id,action,changes) VALUES ($1,$2,'loan',$3,$4,$5::jsonb)`,[tenant,(req as AuthedRequest).auth.id,id,decision,JSON.stringify({terms:decision==='approve'?terms:undefined})]);
@@ -250,8 +334,12 @@ borrowingRouter.patch('/loans/:loanId/custom-offer', asyncHandler(async(req,res)
     const loan=found.rows[0];customer=loan.customer_id;
     if(decision==='offer'){
       if(Number(loan.counter_offer_count)!==0){await db.query('ROLLBACK');res.status(409).json({error:'Only one revised offer can be sent.'});return;}
-      const principal=Number(req.body?.principalAmount),rate=Number(req.body?.interestRatePercent),days=Number(req.body?.durationDays),preference=value(req.body?.repaymentPreference);
-      if(!Number.isFinite(principal)||principal<=0||principal>1_000_000_000||!Number.isFinite(rate)||rate<0||rate>100||!Number.isInteger(days)||days<1||days>3650||!['maturity','flexible'].includes(preference)){await db.query('ROLLBACK');res.status(400).json({error:'Enter a valid amount, flat interest rate, term, and repayment preference.'});return;}
+      const principal=Number(req.body?.principalAmount),rate=Number(req.body?.interestRatePercent),days=Number(req.body?.durationDays),preference='maturity';
+      if(!Number.isFinite(principal)||principal<=0||principal>1_000_000_000||!Number.isFinite(rate)||rate<0||rate>100||!Number.isInteger(days)||days<1||days>3650){await db.query('ROLLBACK');res.status(400).json({error:'Enter a valid amount, flat interest rate, and term.'});return;}
+      if(loan.rollover_from_loan_id){
+        const balance=await db.query(`SELECT COALESCE(SUM(GREATEST(s.principal_due+s.interest_due+s.overdue_charge-s.amount_paid,0)),0) AS amount FROM loan_schedules s JOIN loans p ON p.id=s.loan_id AND p.client_id=s.client_id WHERE s.client_id=$1 AND s.loan_id=$2 AND s.status NOT IN ('paid','waived') AND p.status IN ('active','overdue')`,[tenant,loan.rollover_from_loan_id]);
+        if(Math.abs(Number(balance.rows[0]?.amount||0)-principal)>0.005){await db.query('ROLLBACK');res.status(409).json({error:`The rollover amount must match the current outstanding balance of ₹${Number(balance.rows[0]?.amount||0).toFixed(2)}. Update the offer amount and retry.`});return;}
+      }
       const offer={principal_amount:principal,interest_rate_percent:rate,duration_days:days,repayment_preference:preference,total_repayment:Number((principal*(1+rate/100)).toFixed(2))};
       await db.query(`UPDATE loans SET status='pending_customer_acceptance',counter_offer_count=1,counter_offer=$3::jsonb,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[id,tenant,JSON.stringify(offer)]);
       await db.query(`INSERT INTO customer_notifications (client_id,customer_id,kind,title,body,decision,reference_id) VALUES ($1,$2,'loan','Custom loan offer', $3,'offer',$4)`,[tenant,customer,`Your client offers ₹${principal.toLocaleString('en-IN')} at ${rate}% flat interest for ${days} days. Total repayment: ₹${offer.total_repayment.toLocaleString('en-IN')}. Review and accept or decline in the app.`,id]);
@@ -285,20 +373,42 @@ borrowingRouter.post('/loans/:loanId/disburse', asyncHandler(async(req,res)=>{
   const tenant=clientId(req), id=value(req.params.loanId), start=value(req.body?.date)||new Date().toISOString().slice(0,10);
   const db=await pool.connect();
   try { await db.query('BEGIN');
-    const selected=await db.query(`SELECT l.id,l.request_type,l.custom_duration_days,l.interest_rate_percent,l.principal_amount,l.loan_number,l.borrower_id,l.repayment_preference FROM loans l WHERE l.id=$1 AND l.client_id=$2 AND l.status='approved' FOR UPDATE`,[id,tenant]);
+    const selected=await db.query(`SELECT l.id,l.request_type,l.custom_duration_days,l.interest_rate_percent,l.principal_amount,l.loan_number,l.borrower_id,l.repayment_preference,l.terms_snapshot,l.start_date FROM loans l WHERE l.id=$1 AND l.client_id=$2 AND l.status='approved' FOR UPDATE`,[id,tenant]);
     if(!selected.rowCount){await db.query('ROLLBACK');res.status(409).json({error:'Only approved, undistributed loans can be disbursed.'});return;}
-    const row=selected.rows[0];
-    const maturity=row.request_type==='custom'?new Date(`${start}T00:00:00Z`):null;
+  const row=selected.rows[0],scheduleStart=row.start_date?String(row.start_date).slice(0,10):start;
+    const recordedDisbursement=row.request_type==='daily'?Number(row.terms_snapshot?.net_disbursement_amount??Number(row.principal_amount)*(1-Number(row.interest_rate_percent)*Number(row.terms_snapshot?.interest_duration_months)/100)):Number(row.principal_amount);
+    const maturity=row.request_type==='custom'?new Date(`${scheduleStart}T00:00:00Z`):null;
     if(maturity)maturity.setUTCDate(maturity.getUTCDate()+Number(row.custom_duration_days));
-    const r=await db.query(`UPDATE loans SET status='active',disbursed_at=NOW(),start_date=$3,maturity_date=COALESCE($4,maturity_date),updated_at=NOW()
+    const r=await db.query(`UPDATE loans SET status='active',disbursed_at=NOW(),start_date=COALESCE(start_date,$3),maturity_date=COALESCE(maturity_date,$4),updated_at=NOW()
       WHERE id=$1 AND client_id=$2 RETURNING id,principal_amount,loan_number,borrower_id`,[id,tenant,start,maturity?.toISOString().slice(0,10)??null]);
     if(!r.rowCount){await db.query('ROLLBACK');res.status(409).json({error:'Only approved, undistributed loans can be disbursed.'});return;}
-    await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,principal_debit,event_date,description,actor_id) VALUES ($1,$2,'disbursement',$3,$4,'Manual disbursement recorded',$5)`,[tenant,id,r.rows[0].principal_amount,start,(req as AuthedRequest).auth.id]);
+    await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,principal_debit,event_date,description,actor_id) VALUES ($1,$2,'disbursement',$3,$4,$5,$6)`,[tenant,id,recordedDisbursement,start,row.request_type==='daily'?'Daily loan net amount recorded as disbursed':'Manual disbursement recorded',(req as AuthedRequest).auth.id]);
     if(row.request_type==='custom'){
       const interest=Number((Number(row.principal_amount)*Number(row.interest_rate_percent)/100).toFixed(2));
-      const saved=await db.query(`INSERT INTO loan_schedules (client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES ($1,$2,1,$3,$4,$5) RETURNING id`,[tenant,id,maturity!.toISOString().slice(0,10),row.principal_amount,interest]);
-      await db.query(`INSERT INTO collection_tasks (client_id,borrower_id,loan_id,schedule_id,due_date) VALUES ($1,$2,$3,$4,$5)`,[tenant,row.borrower_id,id,saved.rows[0].id,maturity!.toISOString().slice(0,10)]);
+      const dueDate=maturity!.toISOString().slice(0,10),saved=await db.query(`INSERT INTO loan_schedules (client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES ($1,$2,1,$3,$4,$5) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,id,dueDate,row.principal_amount,interest]);
+      if(saved.rowCount)await db.query(`INSERT INTO collection_tasks (client_id,borrower_id,loan_id,schedule_id,due_date) VALUES ($1,$2,$3,$4,$5)`,[tenant,row.borrower_id,id,saved.rows[0].id,dueDate]);
       await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,interest_debit,event_date,description,actor_id) VALUES ($1,$2,'interest_accrued',$3,$4,'One-time flat custom loan interest',$5)`,[tenant,id,interest,start,(req as AuthedRequest).auth.id]);
+    }
+    if(row.request_type==='daily'){
+      const days=Number(row.terms_snapshot.collection_days),months=Number(row.terms_snapshot.interest_duration_months),rate=Number(row.interest_rate_percent),face=Number(row.principal_amount);
+      if(!Number.isInteger(days)||days<1||!Number.isInteger(months)||months<1||rate*months>=100){await db.query('ROLLBACK');res.status(409).json({error:'Daily loan terms are incomplete or produce a non-positive payout.'});return;}
+      const net=Number((face*(1-rate*months/100)).toFixed(2)),upfront=Number((face-net).toFixed(2));
+      const finalDate=new Date(`${scheduleStart}T00:00:00Z`);finalDate.setUTCDate(finalDate.getUTCDate()+days);const maturityDate=finalDate.toISOString().slice(0,10);
+      await db.query(`UPDATE loans SET maturity_date=$3,terms_snapshot=terms_snapshot||$4::jsonb WHERE id=$1 AND client_id=$2`,[id,tenant,maturityDate,JSON.stringify({net_disbursement_amount:net,upfront_interest_amount:upfront})]);
+      if(upfront>0)await db.query(`INSERT INTO loan_ledger(client_id,loan_id,event_type,principal_debit,event_date,description,actor_id) VALUES($1,$2,'adjustment',$3,$4,'Upfront interest deduction included in the face amount due',$5)`,[tenant,id,upfront,start,(req as AuthedRequest).auth.id]);
+      for(let day=1;day<=days;day++){
+        const due=new Date(`${scheduleStart}T00:00:00Z`);due.setUTCDate(due.getUTCDate()+day);const dueDate=due.toISOString().slice(0,10);
+        const dailyAmount=Number((day===days?face-Number((face/days).toFixed(2))*(days-1):face/days).toFixed(2));
+        const saved=await db.query(`INSERT INTO loan_schedules(client_id,loan_id,installment_number,due_date,principal_due) VALUES($1,$2,$3,$4,$5) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,id,day,dueDate,dailyAmount]);
+        if(saved.rowCount)await db.query(`INSERT INTO collection_tasks(client_id,borrower_id,loan_id,schedule_id,due_date) VALUES($1,$2,$3,$4,$5)`,[tenant,row.borrower_id,id,saved.rows[0].id,dueDate]);
+      }
+    }
+    if(row.request_type==='regular'){
+      const due=new Date(`${scheduleStart}T00:00:00Z`);const day=due.getUTCDate();due.setUTCDate(1);due.setUTCMonth(due.getUTCMonth()+1);due.setUTCDate(Math.min(day,new Date(Date.UTC(due.getUTCFullYear(),due.getUTCMonth()+1,0)).getUTCDate()));
+      const dueDate=due.toISOString().slice(0,10),interest=Number((Number(row.principal_amount)*Number(row.interest_rate_percent)/100).toFixed(2));
+      const saved=await db.query(`INSERT INTO loan_schedules (client_id,loan_id,installment_number,due_date,principal_due,interest_due) VALUES ($1,$2,1,$3,0,$4) ON CONFLICT(loan_id,installment_number) DO NOTHING RETURNING id`,[tenant,id,dueDate,interest]);
+      if(saved.rowCount)await db.query(`INSERT INTO collection_tasks (client_id,borrower_id,loan_id,schedule_id,due_date) VALUES ($1,$2,$3,$4,$5)`,[tenant,row.borrower_id,id,saved.rows[0].id,dueDate]);
+      await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,interest_debit,event_date,description,actor_id) VALUES ($1,$2,'interest_accrued',$3,$4,'Monthly interest on outstanding principal',$5)`,[tenant,id,interest,dueDate,(req as AuthedRequest).auth.id]);
     }
     await db.query(`INSERT INTO loan_audit_logs (client_id,actor_id,entity_type,entity_id,action) VALUES ($1,$2,'loan',$3,'disbursed')`,[tenant,(req as AuthedRequest).auth.id,id]);
     const customer=await db.query(`SELECT customer_id FROM borrowers WHERE id=$1 AND client_id=$2`,[r.rows[0].borrower_id,tenant]);
@@ -313,20 +423,28 @@ borrowingRouter.post('/loans/:loanId/payments', asyncHandler(async(req,res)=>{
   if(!Number.isFinite(amount)){res.status(400).json({error:'Enter a payment amount greater than zero.'});return;}
   const db=await pool.connect();
   try {await db.query('BEGIN');
-    const loan=await db.query(`SELECT l.id,l.loan_number,l.status,l.request_type,l.borrower_id,b.customer_id,lp.* FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id WHERE l.id=$1 AND l.client_id=$2 FOR UPDATE OF l`,[id,tenant]);
+    const loan=await db.query(`SELECT l.id,l.loan_number,l.status,l.request_type,l.maturity_date::text AS maturity_date,l.borrower_id,b.customer_id,lp.* FROM loans l JOIN borrowers b ON b.id=l.borrower_id AND b.client_id=l.client_id JOIN loan_products lp ON lp.id=l.product_id AND lp.client_id=l.client_id WHERE l.id=$1 AND l.client_id=$2 FOR UPDATE OF l`,[id,tenant]);
     if(!loan.rowCount || !['active','overdue'].includes(loan.rows[0].status)){await db.query('ROLLBACK');res.status(409).json({error:'Payments can only be posted to active loans.'});return;}
     const product=loan.rows[0];
+    if(product.request_type==='regular')await ensureRegularInterestSchedules(tenant,receivedOn);
     const schedules=await db.query(`SELECT * FROM loan_schedules WHERE loan_id=$1 AND client_id=$2 AND status IN ('scheduled','partial','overdue') ORDER BY due_date,installment_number FOR UPDATE`,[id,tenant]);
-    const isCustom=product.request_type==='custom';
-    const applicableSchedules=isCustom?schedules.rows:schedules.rows.filter((schedule)=>String(schedule.due_date).slice(0,10)<=receivedOn||product.advance_payment_treatment==='cover_future_dues');
+    const isCustom=product.request_type==='custom',isRegular=product.request_type==='regular',isDaily=product.request_type==='daily';
+    if(isCustom&&product.maturity_date&&receivedOn<String(product.maturity_date).slice(0,10)){
+      const fullBalance=schedules.rows.reduce((sum:number,s:any)=>sum+Math.max(0,Number(s.principal_due)+Number(s.interest_due)+Number(s.overdue_charge)-Number(s.amount_paid)),0);
+      if(amount+0.005<fullBalance){await db.query('ROLLBACK');res.status(400).json({error:`Custom loans can be partially paid only at maturity. To settle early, record the full balance of ₹${fullBalance.toFixed(2)}.`});return;}
+    }
+    const remainingBalance=schedules.rows.reduce((sum:number,s:any)=>sum+Math.max(0,Number(s.principal_due)+Number(s.interest_due)+Number(s.overdue_charge)-Number(s.amount_paid)),0);
+    const dueBalance=schedules.rows.filter((s:any)=>String(s.due_date).slice(0,10)<=receivedOn).reduce((sum:number,s:any)=>sum+Math.max(0,Number(s.principal_due)+Number(s.interest_due)+Number(s.overdue_charge)-Number(s.amount_paid)),0);
+    if(isDaily&&(amount>remainingBalance+0.005||(amount+0.005<dueBalance)||(amount>dueBalance+0.005&&amount+0.005<remainingBalance))){await db.query('ROLLBACK');res.status(400).json({error:`Daily loan payments must cover all accumulated collections (₹${dueBalance.toFixed(2)}) or settle the full remaining balance (₹${remainingBalance.toFixed(2)}).`});return;}
+    const applicableSchedules=isCustom?schedules.rows:isDaily&&amount+0.005>=remainingBalance?schedules.rows:schedules.rows.filter((schedule)=>String(schedule.due_date).slice(0,10)<=receivedOn||(!isRegular&&product.advance_payment_treatment==='cover_future_dues'));
     const nextSchedule=applicableSchedules[0];
-    if(!isCustom&&!product.part_payments_allowed && nextSchedule){
+    if(!isCustom&&!isRegular&&!product.part_payments_allowed && nextSchedule){
       const nextDue=Number(nextSchedule.principal_due)+Number(nextSchedule.interest_due)+Number(nextSchedule.overdue_charge)-Number(nextSchedule.amount_paid);
       if(amount+0.005<nextDue){await db.query('ROLLBACK');res.status(400).json({error:`Part payments are disabled. The next scheduled amount is ₹${nextDue.toFixed(2)}.`});return;}
     }
     let left=amount, principal=0, interest=0, overdue=0;
     for(const s of applicableSchedules){
-      const order=product.payment_allocation==='principal_first'?['principal_due','interest_due','overdue_charge']:['overdue_charge','interest_due','principal_due'];
+      const order=product.request_type==='regular'?['overdue_charge','interest_due','principal_due']:product.payment_allocation==='principal_first'?['principal_due','interest_due','overdue_charge']:['overdue_charge','interest_due','principal_due'];
       let priorPaid=Number(s.amount_paid), schedulePaid=Number(s.amount_paid);
       for(const component of order){
         const componentDue=Number(s[component]);
@@ -340,6 +458,10 @@ borrowingRouter.post('/loans/:loanId/payments', asyncHandler(async(req,res)=>{
         const total=Number(s.principal_due)+Number(s.interest_due)+Number(s.overdue_charge);
         await db.query(`UPDATE loan_schedules SET amount_paid=$3,status=$4,updated_at=NOW() WHERE id=$1 AND client_id=$2`,[s.id,tenant,schedulePaid.toFixed(2),schedulePaid+0.005>=total?'paid':'partial']);
       }
+    }
+    if(product.request_type==='regular'&&left>0){
+      const outstanding=await db.query(`SELECT GREATEST(COALESCE(SUM(principal_debit-principal_credit),0),0) AS principal FROM loan_ledger WHERE client_id=$1 AND loan_id=$2`,[tenant,id]);
+      const applied=Math.min(left,Number(outstanding.rows[0].principal));principal+=applied;left-=applied;
     }
     if(left && product.advance_payment_treatment==='reduce_principal'){
       for(const s of [...schedules.rows].reverse()){
@@ -358,15 +480,22 @@ borrowingRouter.post('/loans/:loanId/payments', asyncHandler(async(req,res)=>{
     const inserted=await db.query(`INSERT INTO loan_payments (client_id,loan_id,customer_id,received_on,amount_received,principal_component,interest_component,overdue_component,unapplied_amount,reference_number,recorded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,[tenant,id,product.customer_id,receivedOn,amount.toFixed(2),principal.toFixed(2),interest.toFixed(2),overdue.toFixed(2),unapplied.toFixed(2),reference,(req as AuthedRequest).auth.id]);
     await db.query(`INSERT INTO loan_ledger (client_id,loan_id,event_type,principal_credit,interest_credit,overdue_credit,reference_type,reference_id,event_date,description,actor_id) VALUES ($1,$2,'payment',$3,$4,$5,'payment',$6,$7,'Repayment recorded',$8)`,[tenant,id,principal.toFixed(2),interest.toFixed(2),overdue.toFixed(2),inserted.rows[0].id,receivedOn,(req as AuthedRequest).auth.id]);
+    if(product.request_type==='regular'){
+      const remaining=await db.query(`SELECT COALESCE(SUM(principal_debit-principal_credit),0) AS principal FROM loan_ledger WHERE client_id=$1 AND loan_id=$2`,[tenant,id]);
+      if(Number(remaining.rows[0].principal)<=0.005){
+        await db.query(`UPDATE loan_schedules SET status='waived',updated_at=NOW() WHERE client_id=$1 AND loan_id=$2 AND due_date>$3 AND status IN ('scheduled','partial','overdue')`,[tenant,id,receivedOn]);
+        await db.query(`UPDATE collection_tasks SET status='completed',completed_by=$3,completed_at=NOW() WHERE client_id=$1 AND loan_id=$2 AND status='pending' AND schedule_id IN (SELECT id FROM loan_schedules WHERE client_id=$1 AND loan_id=$2 AND status='waived')`,[tenant,id,(req as AuthedRequest).auth.id]);
+      }
+    }
     await db.query(`INSERT INTO customer_notifications (client_id,customer_id,kind,title,body,decision,reference_id)
       VALUES ($1,$2,'loan','Loan repayment recorded',$3,'recorded',$4)`,[tenant,product.customer_id,`A repayment of ₹${amount.toLocaleString('en-IN')} for loan ${product.loan_number ?? id} was recorded.`,inserted.rows[0].id]);
     await db.query(`UPDATE collection_tasks SET status='completed',completed_by=$3,completed_at=NOW() WHERE loan_id=$1 AND client_id=$2 AND status='pending' AND schedule_id IN (SELECT id FROM loan_schedules WHERE loan_id=$1 AND status='paid')`,[id,tenant,(req as AuthedRequest).auth.id]);
     await db.query(`UPDATE loans l SET
       status=CASE
-        WHEN (l.request_type='custom' OR lp.closure_mode='automatic') AND NOT EXISTS (SELECT 1 FROM loan_schedules s WHERE s.client_id=l.client_id AND s.loan_id=l.id AND s.status NOT IN ('paid','waived')) THEN 'closed'
+        WHEN (l.request_type IN ('custom','regular','daily') OR lp.closure_mode='automatic') AND NOT EXISTS (SELECT 1 FROM loan_schedules s WHERE s.client_id=l.client_id AND s.loan_id=l.id AND s.status NOT IN ('paid','waived')) AND NOT EXISTS (SELECT 1 FROM loan_ledger ll WHERE ll.client_id=l.client_id AND ll.loan_id=l.id GROUP BY ll.loan_id HAVING SUM(ll.principal_debit-ll.principal_credit)>0.005) THEN 'closed'
         WHEN l.status='overdue' AND NOT EXISTS (SELECT 1 FROM loan_schedules s WHERE s.client_id=l.client_id AND s.loan_id=l.id AND s.status='overdue') THEN 'active'
         ELSE l.status END,
-      closed_at=CASE WHEN (l.request_type='custom' OR lp.closure_mode='automatic') AND NOT EXISTS (SELECT 1 FROM loan_schedules s WHERE s.client_id=l.client_id AND s.loan_id=l.id AND s.status NOT IN ('paid','waived')) THEN NOW() ELSE l.closed_at END,
+      closed_at=CASE WHEN (l.request_type IN ('custom','regular','daily') OR lp.closure_mode='automatic') AND NOT EXISTS (SELECT 1 FROM loan_schedules s WHERE s.client_id=l.client_id AND s.loan_id=l.id AND s.status NOT IN ('paid','waived')) AND NOT EXISTS (SELECT 1 FROM loan_ledger ll WHERE ll.client_id=l.client_id AND ll.loan_id=l.id GROUP BY ll.loan_id HAVING SUM(ll.principal_debit-ll.principal_credit)>0.005) THEN NOW() ELSE l.closed_at END,
       updated_at=NOW() FROM loan_products lp WHERE l.id=$1 AND l.client_id=$2 AND lp.id=l.product_id AND lp.client_id=l.client_id`,[id,tenant]);
     await db.query('COMMIT');res.status(201).json({paymentId:inserted.rows[0].id,amount,principal,interest,overdue,unapplied});
   }catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}

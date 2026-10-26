@@ -30,6 +30,20 @@ const CLIENT_NAV = [
   { to: '/manage-passwords', label: 'Manage Passwords', end: false, icon: KeyRound },
 ] as const;
 
+const ALL_CLIENT_NAV = [
+  { to: '/?workspace=all', label: 'Dashboard', end: true, icon: LayoutDashboard },
+  { to: '/customers?workspace=all', label: 'Customers', end: false, icon: Users },
+  { to: '/investment-requests?workspace=all', label: 'Investment Requests', end: false, icon: TrendingUp },
+  { to: '/withdrawals?workspace=all', label: 'Withdrawals', end: false, icon: Wallet },
+  { to: '/borrowing/loans?workspace=all', label: 'Borrowing', end: false, icon: HandCoins },
+  { to: '/tds?workspace=all', label: 'TDS', end: false, icon: Receipt },
+  { to: '/referrals?workspace=all', label: 'Referrals & Commission', end: false, icon: Gift },
+  { to: '/reports?workspace=all', label: 'Reports', end: false, icon: FileBarChart },
+  { to: '/notifications?workspace=all', label: 'Notifications', end: false, icon: Bell },
+  { to: '/settings?workspace=all', label: 'Settings', end: false, icon: Settings },
+  { to: '/manage-passwords?workspace=all', label: 'Manage Passwords', end: false, icon: KeyRound },
+] as const;
+
 type SidebarProps = {
   open: boolean;
   onClose: () => void;
@@ -40,6 +54,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const location = useLocation();
   const isSuperAdmin = admin?.role === 'super_admin';
   const borrowingActive = location.pathname.startsWith('/borrowing');
+  const allWorkspace = location.pathname.startsWith('/all') || new URLSearchParams(location.search).get('workspace') === 'all';
   const clientLabel = admin?.clientName || 'Client Admin';
 
   return (
@@ -84,7 +99,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </NavLink>
             </>
           ) : (
-            (borrowingActive
+            (allWorkspace
+              ? ALL_CLIENT_NAV
+              : borrowingActive
               ? [
                   { to: '/borrowing', label: 'Dashboard', end: true, icon: LayoutDashboard },
                   { to: '/borrowing/customers', label: 'Customers', end: false, icon: Users },

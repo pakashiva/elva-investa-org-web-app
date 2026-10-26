@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { Link, useLocation, useOutletContext } from 'react-router-dom';
 import { AppHeader } from '../components/AppHeader';
 import { ErrorBanner } from '../components/States';
 import { useAuth } from '../contexts/AuthContext';
@@ -116,6 +116,8 @@ function plusDaysIso(days: number): string {
 
 export function ReportsPage() {
   const { onOpenMenu } = useOutletContext<AdminOutletContext>();
+  const location = useLocation();
+  const allWorkspace = new URLSearchParams(location.search).get('workspace') === 'all';
   const { admin } = useAuth();
   const history = useGeneratedReports();
   const [preset, setPreset] = useState<ReportDatePreset>('last_30');
@@ -256,6 +258,11 @@ export function ReportsPage() {
           </article>
         ))}
       </section>
+
+      {allWorkspace ? <section className="card all-borrowing-reports-card">
+        <div><h2>Borrowing Reports</h2><p>Export the loan book and collection records alongside investment reports.</p></div>
+        <Link className="primary-btn" to="/borrowing/reports?workspace=all">Open Borrowing Reports</Link>
+      </section> : null}
 
       <section className="table-shell" style={{ marginTop: 24 }}>
         <div className="table-toolbar">
