@@ -263,6 +263,7 @@ a {
   gap: 14px;
   margin-left: auto;
   justify-self: end;
+  padding-top: 8px;
 }
 
 .module-switch {

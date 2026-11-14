@@ -7,6 +7,16 @@ type ProviderResponse = {
   requestId?: string;
 };
 
+export class OtpProviderError extends Error {
+  status: number;
+
+  constructor(message: string, status = 502) {
+    super(message);
+    this.name = 'OtpProviderError';
+    this.status = status;
+  }
+}
+
 export function toOtpPhone(mobile: string): string {
   const digits = mobile.replace(/\D/g, '');
   if (digits.length === 10) {
@@ -48,24 +58,40 @@ export async function callElvatechOtp(
     payload.otp = otp;
   }
 
-  const response = await fetch(`${config.otp.apiBaseUrl}/otp/${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.otp.apiBaseUrl}/otp/${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    console.error('[OTP] Provider request failed', {
+      action: path,
+      reason: timedOut ? 'timeout' : 'network_error',
+    });
+    throw new OtpProviderError(
+      timedOut
+        ? 'The OTP service did not respond in time. Please try again shortly.'
+        : 'The OTP service could not be reached. Please try again shortly.'
+    );
+  }
 
   let body: ProviderResponse;
   try {
     body = (await response.json()) as ProviderResponse;
   } catch {
-    throw new Error('Unexpected response from OTP service.');
+    throw new OtpProviderError('The OTP service returned an invalid response.');
   }
 
   if (!response.ok || body.success === false) {
-    throw new Error(body.message ?? `OTP request failed (${response.status}).`);
+    const message = body.message ?? `OTP request failed (${response.status}).`;
+    throw new OtpProviderError(message, response.status >= 500 ? 502 : 400);
   }
 
   return {

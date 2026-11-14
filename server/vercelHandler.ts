@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { app } from './app';
-import { ensureReady } from './ready';
 
 function sendJson(res: ServerResponse, status: number, body: Record<string, unknown>) {
   if (res.headersSent) {
@@ -34,7 +33,6 @@ function restoreApiPath(req: IncomingMessage) {
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
     restoreApiPath(req);
-    await ensureReady();
     await new Promise<void>((resolve, reject) => {
       res.once('finish', resolve);
       res.once('close', resolve);

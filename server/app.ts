@@ -8,6 +8,7 @@ import { dashboardRouter } from './routes/dashboard';
 import { mobileAuthRouter } from './routes/mobileAuth';
 import { mobilePortalRouter } from './routes/mobilePortal';
 import { borrowingRouter } from './routes/borrowing';
+import { ensureReady } from './ready';
 
 export const app = express();
 app.use(express.json({ limit: '12mb' }));
@@ -26,6 +27,21 @@ app.use((req, res, next) => {
     return;
   }
   next();
+});
+
+// Registration OTP send/verify only call the OTP provider and do not use
+// Postgres. Keep those paths available when the database is unavailable;
+// initialize/migrate before every other API route that may use the database.
+app.use((req, _res, next) => {
+  const registrationOtp =
+    req.method === 'POST' &&
+    (req.path === '/api/mobile/auth/otp/send' || req.path === '/api/mobile/auth/otp/verify') &&
+    req.body?.mode === 'registration';
+  if (registrationOtp || req.path === '/api/health') {
+    next();
+    return;
+  }
+  void ensureReady().then(() => next()).catch(next);
 });
 
 app.get('/api/health', (_req, res) => {

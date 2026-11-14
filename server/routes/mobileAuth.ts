@@ -293,8 +293,19 @@ mobileAuthRouter.post(
       await pool.query(`UPDATE customers SET customer_type=$2 WHERE id=$1`, [existing.id, customerType]);
       if (includesBorrow) {
         await pool.query(`INSERT INTO borrowers (client_id,customer_id) VALUES ($1,$2) ON CONFLICT (client_id,customer_id) DO NOTHING`, [clientId, existing.id]);
+      } else {
+        await pool.query(
+          `UPDATE borrowers SET status='inactive',updated_at=NOW()
+           WHERE client_id=$1 AND customer_id=$2 AND status='active'`,
+          [clientId, existing.id]
+        );
       }
-      sendCustomerSession(res, existing, 200, { resumed: true });
+      const resumedCustomer = await loadCustomerAuth(existing.id);
+      if (!resumedCustomer) {
+        res.status(500).json({ error: 'Account was updated but could not be loaded.' });
+        return;
+      }
+      sendCustomerSession(res, resumedCustomer, 200, { resumed: true });
       return;
     }
 
@@ -380,7 +391,26 @@ mobileAuthRouter.post(
       if (isEmailMobileComboDuplicate(error)) {
         const existing = await resumeUnverifiedRegistration(clientId, mobile, email, password);
         if (existing && existing !== 'conflict') {
-          sendCustomerSession(res, existing, 200, { resumed: true });
+          await pool.query(`UPDATE customers SET customer_type=$2 WHERE id=$1`, [existing.id, customerType]);
+          if (includesBorrow) {
+            await pool.query(
+              `INSERT INTO borrowers (client_id,customer_id) VALUES ($1,$2)
+               ON CONFLICT (client_id,customer_id) DO UPDATE SET status='active',updated_at=NOW()`,
+              [clientId, existing.id]
+            );
+          } else {
+            await pool.query(
+              `UPDATE borrowers SET status='inactive',updated_at=NOW()
+               WHERE client_id=$1 AND customer_id=$2 AND status='active'`,
+              [clientId, existing.id]
+            );
+          }
+          const resumedCustomer = await loadCustomerAuth(existing.id);
+          if (!resumedCustomer) {
+            res.status(500).json({ error: 'Account was updated but could not be loaded.' });
+            return;
+          }
+          sendCustomerSession(res, resumedCustomer, 200, { resumed: true });
           return;
         }
         res.status(409).json({ error: EMAIL_MOBILE_COMBO_ERROR });
@@ -619,7 +649,7 @@ async function customerFromPasswordFlow(
 function httpError(error: unknown, res: { status: (code: number) => { json: (body: unknown) => void } }) {
   const status = Number((error as { status?: number }).status ?? 0);
   const message = error instanceof Error ? error.message : 'Request failed.';
-  if (status >= 400 && status < 500) {
+  if (status >= 400 && status < 600) {
     res.status(status).json({ error: message });
     return true;
   }
