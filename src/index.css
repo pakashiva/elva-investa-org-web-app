@@ -241,6 +241,10 @@ a {
   margin-bottom: 24px;
 }
 
+.page-header:not(:has(.module-switch)) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .page-header > :first-child { min-width: 0; }
 
 .page-title h1 {
